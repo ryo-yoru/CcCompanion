@@ -3307,21 +3307,19 @@ class PushHandler(BaseHTTPRequestHandler):
         # set typing
         self.state.typing_state = {"is_typing": True, "since": _dt.now().isoformat(timespec="milliseconds")}
 
-        # 调 bus_send.py 注入主 session (异步)
-        try:
-            subprocess.Popen(
-                [
-                    "python3",
-                    self.state.bus_send_path,
-                    "--source", "ios-app",
-                    "--sender", "iphone",
-                    "--text", injected,
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception as e:
-            logger.warning("bus_send fail: %s", e)
+        # 注入 regenerate 文本到 active session — 走 _inject_to_session helper
+        # ccc 公开用户没 ~/scripts/bus_send.py 时 fallback 直接 tmux 注入
+        target_session = (self.state.active_session or "opia").strip()
+        ok, err = self._inject_to_session(target_session, injected, source="ios-app", sender="iphone")
+        if not ok:
+            self._send_json(502, {
+                "ok": False,
+                "error": f"inject regenerate to '{target_session}' failed: {err}",
+                "marked_hidden": marked,
+                "replace_msg_id": replace_msg_id,
+                "extra_marked": extra_marked,
+            })
+            return
 
         self._send_json(200, {
             "ok": True,
@@ -3643,33 +3641,29 @@ class PushHandler(BaseHTTPRequestHandler):
             location=location,
         )
 
-        # 如果是 user 上传 也往 bus 注入主 session 让我感知 (带 attachment hint)
+        # 如果是 user 上传 也往主 session 注入一条 hint 让 chain 感知有附件
         if role == "user":
-            try:
-                hint = f"[用户发了{'图片' if atype == 'image' else '文件'}: {filename}]"
-                if rec.get("location"):
-                    loc = rec["location"]
-                    label = loc.get("label", "")
-                    hint += f" [位置 lat={loc['lat']:.6f} lon={loc['lon']:.6f}{(' ' + label) if label else ''}]"
-                if text:
-                    hint = hint + " " + text
-                if rec.get("quoted_text"):
-                    hint = f"[引用 \"{rec['quoted_text']}\"]\n" + hint
-                # 给主 session 一条 hint 让我读 file (mac mini 内可读 stored_path)
-                hint += f"\n本地路径: {stored_path}"
-                subprocess.Popen(
-                    [
-                        "python3",
-                        self.state.bus_send_path,
-                        "--source", "ios-app",
-                        "--sender", "iphone",
-                        "--text", hint,
-                    ],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            except Exception as e:
-                logger.warning("bus_send fail: %s", e)
+            hint = f"[用户发了{'图片' if atype == 'image' else '文件'}: {filename}]"
+            if rec.get("location"):
+                loc = rec["location"]
+                label = loc.get("label", "")
+                hint += f" [位置 lat={loc['lat']:.6f} lon={loc['lon']:.6f}{(' ' + label) if label else ''}]"
+            if text:
+                hint = hint + " " + text
+            if rec.get("quoted_text"):
+                hint = f"[引用 \"{rec['quoted_text']}\"]\n" + hint
+            # 给主 session 一条 hint 让 chain 读 file (mac mini 内可读 stored_path)
+            hint += f"\n本地路径: {stored_path}"
+            target_session = (self.state.active_session or "opia").strip()
+            ok, err = self._inject_to_session(target_session, hint, source="ios-app", sender="iphone")
+            if not ok:
+                # 附件已存盘 + 历史已 append 但 chain 注入失败 — 502 surface
+                self._send_json(502, {
+                    "ok": False,
+                    "error": f"inject attachment hint to '{target_session}' failed: {err}",
+                    "record": rec,
+                })
+                return
 
         self._send_json(200, {"ok": True, "record": rec})
 
