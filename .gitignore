@@ -22,6 +22,11 @@ xcuserdata/
 *.swp
 *.swo
 
+# --- private fastlane (含 Apple Team ID / API key / UDID — 不能 commit 公开 repo) ---
+ios-app/CcCompanion/fastlane/
+ios-app/CcCompanion/Gemfile*
+ios-app/CcCompanion/Pluginfile
+
 # --- iOS app build outputs (we keep source only) ---
 /build/
 ios-app/build/
