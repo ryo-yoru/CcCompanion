@@ -3104,6 +3104,8 @@ private struct ChatInputBar: View {
     let onLocation: () -> Void
 
     @State private var draftLocal: String = ""
+    // issue #4 fix: prefix = draft text before speech started; replaced (not appended) on each partial
+    @State private var speechPrefix: String = ""
     // 2026-05-07 用户 catch chain working 起一瞬间 stop button 闪一下 加 0.5s 延迟显示防闪
     @State private var delayedIsWorking: Bool = false
     @State private var commitPending: Bool = false
@@ -3217,6 +3219,10 @@ private struct ChatInputBar: View {
                     }
                 } else if !inputFocused.wrappedValue {
                     Button {
+                        if !speech.isRecording {
+                            // Capture pre-speech text so partial results replace (not append) it
+                            speechPrefix = draftLocal.isEmpty ? "" : draftLocal + " "
+                        }
                         Task { await speech.toggle() }
                     } label: {
                         Image(systemName: speech.isRecording ? "mic.fill" : "mic")
@@ -3225,9 +3231,9 @@ private struct ChatInputBar: View {
                             .padding(.trailing, 10)
                     }
                     .onChange(of: speech.transcript) { _, newValue in
-                        if !newValue.isEmpty {
-                            draftLocal = (draftLocal.isEmpty ? "" : draftLocal + " ") + newValue
-                        }
+                        guard !newValue.isEmpty else { return }
+                        // Replace the speech portion in-place — partial and final both use this path
+                        draftLocal = speechPrefix + newValue
                     }
                     .alert("语音识别问题", isPresented: Binding(
                         get: { speech.lastError != nil },
