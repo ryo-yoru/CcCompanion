@@ -26,6 +26,7 @@ The whole thing is **local-first** — your messages never go through our server
 - **Slash commands** — `/new`, `/list`, `/switch <sid>`, `/stop`, `/compact`, `/clear`, `/help`. Multi-session aware.
 - **Multi-endpoint** — chain multiple server URLs (Tailscale `100.x` + LAN `10.x` + localhost) with auto-fallback ping. Travel between networks, the app picks the live one.
 - **Polling local notifications**: when polling receives a new assistant message, the app can fire a local iOS notification for glasses and other accessories that only mirror local notifications. This is on by default and can be disabled in Settings.
+- **Remote APNs push**: build 213+ can receive server-side APNs alerts while the app is fully backgrounded or the phone is locked, provided the app bundle has Push Notifications enabled and the Mac server is configured with APNs credentials. Build 212 and earlier only provide in-app polling plus local notifications.
 - **Experimental feature flags**: new or risky app features ship behind Settings toggles first. The workgroup view is off by default and can be enabled from Settings.
 - **Onboarding wizard** — 6-step setup on first launch (server URL + secret + avatars + name + ping test).
 - **Theme** — light / dark / warm, optionally follow system.
@@ -140,6 +141,7 @@ You will need to:
 
 - Set your own bundle identifier in the `CcCompanion` target settings (default is `com.example.cccompanion` and will conflict with anything signed by Apple).
 - Provide your own Apple Developer team for signing (free personal team works for 7-day on-device builds).
+- Enable Push Notifications for that bundle identifier if you want native APNs. The server config bundle id must match exactly, including lowercase `com.starryfield.cccompanion` style casing.
 - Run `apns-server` on a Mac that's reachable from your iPhone, with `config.toml` filled in.
 
 ## Common questions

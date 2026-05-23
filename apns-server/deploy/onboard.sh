@@ -6,7 +6,7 @@
 #   ./onboard.sh --p8 ~/Downloads/AuthKey_ABC1234567.p8 \
 #                --team-id DEF7654321 \
 #                --key-id  ABC1234567 \
-#                [--bundle-id com.starryfield.CcCompanion]
+#                [--bundle-id com.starryfield.cccompanion]
 #
 # 做的事:
 #   1 validate 输入
@@ -33,7 +33,8 @@ HEALTH_URL="http://127.0.0.1:8795/health"
 P8=""
 TEAM_ID=""
 KEY_ID=""
-BUNDLE_ID="com.starryfield.CcCompanion"
+# APNs topic is case-sensitive. Keep this aligned with the iOS bundle id.
+BUNDLE_ID="com.starryfield.cccompanion"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

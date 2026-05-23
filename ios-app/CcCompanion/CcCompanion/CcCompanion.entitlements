@@ -8,5 +8,8 @@
 	<array>
 		<string>group.starryfield.cccompanion</string>
 	</array>
+	<!-- APNs remote notifications. Xcode/provisioning must also enable Push Notifications for com.starryfield.cccompanion. -->
+	<key>aps-environment</key>
+	<string>development</string>
 </dict>
 </plist>
