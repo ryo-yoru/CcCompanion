@@ -26,6 +26,7 @@ The whole thing is **local-first** — your messages never go through our server
 - **Slash commands** — `/new`, `/list`, `/switch <sid>`, `/stop`, `/compact`, `/clear`, `/help`. Multi-session aware.
 - **Multi-endpoint** — chain multiple server URLs (Tailscale `100.x` + LAN `10.x` + localhost) with auto-fallback ping. Travel between networks, the app picks the live one.
 - **Polling local notifications**: when polling receives a new assistant message, the app can fire a local iOS notification for glasses and other accessories that only mirror local notifications. This is on by default and can be disabled in Settings.
+- **Experimental feature flags**: new or risky app features ship behind Settings toggles first. The workgroup view is off by default and can be enabled from Settings.
 - **Onboarding wizard** — 6-step setup on first launch (server URL + secret + avatars + name + ping test).
 - **Theme** — light / dark / warm, optionally follow system.
 - **Privacy** — server `config.toml` is `.gitignore`-d, `.p8` keys live in `apns-server/secrets/` (also ignored). The repo ships with `config.example.toml` only.
@@ -78,6 +79,14 @@ For the iOS side, install via TestFlight: <https://testflight.apple.com/join/PLA
 ```
 
 Network: app and server communicate over Tailscale, ZeroTier, or LAN. The default `config.toml` binds the server to `127.0.0.1`; you bump it to `0.0.0.0` once you've configured the overlay network and the auth secret.
+
+## Experimental Feature Flags
+
+New CcCompanion features that change navigation, notifications, rendering, or agent workflows should start behind a Settings toggle backed by `@AppStorage`. The default should be off unless the feature is a compatibility or safety fix. This keeps upgrades stable for existing users while allowing local testers to opt in.
+
+Current flag:
+
+- `feature_group_view`: shows the 工作群 tab and polls `/group/poll` for multi-agent workgroup messages.
 
 ## Repository layout
 

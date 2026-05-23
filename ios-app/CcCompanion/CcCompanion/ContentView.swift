@@ -54,6 +54,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var theme = ThemeStore.shared
     @AppStorage("cc_onboarding_completed") private var onboardingCompleted: Bool = false
+    @AppStorage("feature_group_view") private var featureGroupView: Bool = false
 
     private var needsOnboarding: Bool {
         if !onboardingCompleted { return true }
@@ -62,11 +63,15 @@ struct ContentView: View {
     }
 
     private var tabs: [FloatingTabBarItem] {
-        return [
+        var items: [FloatingTabBarItem] = [
             .init(id: 0, title: "聊天", systemImage: "bubble.left.and.bubble.right"),
-            .init(id: 1, title: "终端", systemImage: "terminal"),
-            .init(id: 2, title: "设置", systemImage: "gearshape.fill"),
         ]
+        if featureGroupView {
+            items.append(.init(id: 3, title: "工作群", systemImage: "person.3.sequence.fill"))
+        }
+        items.append(.init(id: 1, title: "终端", systemImage: "terminal"))
+        items.append(.init(id: 2, title: "设置", systemImage: "gearshape.fill"))
+        return items
     }
 
     var body: some View {
@@ -77,6 +82,7 @@ struct ContentView: View {
                 case 0: NavigationStack { ChatView(onShowFavorites: { showFavorites = true }, scrollToken: chatScrollToken) }
                 case 1: NavigationStack { TerminalView() }
                 case 2: NavigationStack { CcSettingsView() }
+                case 3 where featureGroupView: NavigationStack { GroupChatView() }
                 default: NavigationStack { ChatView(onShowFavorites: { showFavorites = true }, scrollToken: chatScrollToken) }
                 }
             }
@@ -104,6 +110,11 @@ struct ContentView: View {
         }
         .onChange(of: selectedTab) { _, newTab in
             if newTab == 0 { chatScrollToken &+= 1 }
+        }
+        .onChange(of: featureGroupView) { _, enabled in
+            if !enabled && selectedTab == 3 {
+                selectedTab = 0
+            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active && selectedTab == 0 {
