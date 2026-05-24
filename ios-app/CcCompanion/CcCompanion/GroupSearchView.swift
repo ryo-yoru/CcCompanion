@@ -19,7 +19,7 @@ struct GroupSearchBar: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Color.ccTextDim)
-                TextField("搜工作群消息 / @mention / agent", text: $text)
+                TextField("搜群聊消息 / @mention / agent", text: $text)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
                     .font(.ccSerifAdaptive(size: 14))

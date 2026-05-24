@@ -67,7 +67,7 @@ struct ContentView: View {
             .init(id: 0, title: "聊天", systemImage: "bubble.left.and.bubble.right"),
         ]
         if featureGroupView {
-            items.append(.init(id: 3, title: "工作群", systemImage: "person.3.sequence.fill"))
+            items.append(.init(id: 3, title: "群聊", systemImage: "person.3.sequence.fill"))
         }
         items.append(.init(id: 1, title: "终端", systemImage: "terminal"))
         items.append(.init(id: 2, title: "设置", systemImage: "gearshape.fill"))

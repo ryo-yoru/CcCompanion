@@ -338,7 +338,7 @@ struct CcSettingsView: View {
     @AppStorage("notify_on_polling_assistant") private var notifyOnPollingAssistant: Bool = true
     @AppStorage("enable_decision_haptic") private var enableDecisionHaptic: Bool = true
     @AppStorage("feature_group_view") private var featureGroupView: Bool = false
-    @AppStorage("group_name") private var groupName: String = "工作群"
+    @AppStorage("group_name") private var groupName: String = "群聊"
     @AppStorage("chat_font_size_level") private var chatFontLevel: String = "medium"
     // Phase D 2026-05-11 — "仿 cc 终端文字" default true (旧行为). 关掉显示 "[AI名字] 正在输入..."
     @AppStorage("typing_verbs_enabled") private var typingVerbsEnabled: Bool = true
@@ -351,6 +351,7 @@ struct CcSettingsView: View {
     @AppStorage("chat_background_path") private var chatBackgroundPath: String = ""
 
     @State private var actionToast: String = ""
+    @State private var showHapticInfo: Bool = false
 
     // Phase multi-server fallback (2026-05-11) — endpoints UI state
     @ObservedObject private var resolver = EndpointResolver.shared
@@ -462,8 +463,10 @@ struct CcSettingsView: View {
                 // Group 7 FEATURES (大砍版)
                 section("FEATURES") {
                     toggleRow("仿ClaudeCode趣味Thinking文字", binding: $typingVerbsEnabled)
-                    toggleRow("轮询收到助手消息时本地通知", binding: $notifyOnPollingAssistant)
-                    toggleRow("决策提示触感和声效", binding: $enableDecisionHaptic)
+                    toggleRow("新消息通知", binding: $notifyOnPollingAssistant)
+                    toggleRowWithInfo("决策提示触感和声效", binding: $enableDecisionHaptic) {
+                        showHapticInfo = true
+                    }
                 }
 
                 groupConfigSection
@@ -551,6 +554,11 @@ struct CcSettingsView: View {
         .onChange(of: groupName) { _, _ in
             NotificationCenter.default.post(name: .ccGroupAppearanceDidChange, object: nil)
         }
+        .alert("决策提示触感和声效", isPresented: $showHapticInfo) {
+            Button("好") {}
+        } message: {
+            Text("当群聊里 agent 标记需要你拍板（例如砥/枢 完成任务等你 review），或 ccc 检测到 ship/block/task 关键消息时，会触发一次短触感 + 提示音。\n\n关掉就只在通知中心安静收，不振不响。")
+        }
         // Phase multi-server fallback — endpoint editor sheet
         .sheet(item: $editingEndpoint) { edit in
             EndpointEditorSheet(initial: edit) { saved in
@@ -633,9 +641,9 @@ struct CcSettingsView: View {
                         if let storedFilename = AvatarDiskStore.save(cropped, filename: GroupAvatarStore.filename(for: memberId)) {
                             GroupAvatarStore.setAvatarPath(storedFilename, for: memberId)
                             groupAvatarRefreshTick &+= 1
-                            actionToast = "工作群头像已存"
+                            actionToast = "群聊头像已存"
                         } else {
-                            actionToast = "工作群头像保存失败"
+                            actionToast = "群聊头像保存失败"
                         }
                         groupAvatarCropPresented = false
                         groupAvatarPickedImage = nil
@@ -653,9 +661,9 @@ struct CcSettingsView: View {
 
     @ViewBuilder
     private var groupConfigSection: some View {
-        section("工作群") {
+        section("群聊") {
             rowToggleableText(label: "群名称") {
-                TextField("工作群", text: $groupName)
+                TextField("群聊", text: $groupName)
                     .textFieldStyle(.plain)
                     .font(.system(.body, design: .monospaced))
                     .foregroundStyle(Color.ccAccent)
@@ -666,7 +674,7 @@ struct CcSettingsView: View {
                 groupAvatarRow(member: member)
             }
 
-            toggleRow("工作群视图", binding: $featureGroupView)
+            toggleRow("群聊视图", binding: $featureGroupView)
         }
         .id("group-config-\(groupAvatarRefreshTick)")
     }
@@ -920,6 +928,28 @@ struct CcSettingsView: View {
                 .font(.ccSerifAdaptive(size: 15))
                 .foregroundStyle(Color.ccText)
             Spacer()
+            Toggle("", isOn: binding)
+                .labelsHidden()
+                .tint(Color.ccAccent)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .overlay(Rectangle().fill(Color.ccTextDim.opacity(0.1)).frame(height: 0.5), alignment: .bottom)
+    }
+
+    @ViewBuilder
+    private func toggleRowWithInfo(_ label: String, binding: Binding<Bool>, onInfo: @escaping () -> Void) -> some View {
+        HStack {
+            Text(label)
+                .font(.ccSerifAdaptive(size: 15))
+                .foregroundStyle(Color.ccText)
+            Spacer()
+            Button(action: onInfo) {
+                Image(systemName: "info.circle")
+                    .font(.ccSerifAdaptive(size: 15))
+                    .foregroundStyle(Color.ccAccent)
+            }
+            .buttonStyle(.plain)
             Toggle("", isOn: binding)
                 .labelsHidden()
                 .tint(Color.ccAccent)

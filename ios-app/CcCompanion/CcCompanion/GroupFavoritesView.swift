@@ -101,7 +101,7 @@ struct GroupFavoritesView: View {
                         .foregroundStyle(Color.ccText)
                 }
                 Spacer()
-                Text("工作群收藏")
+                Text("群聊收藏")
                     .font(.ccSerifAdaptive(size: 17, weight: .semibold))
                     .foregroundStyle(Color.ccText)
                 Spacer()
@@ -138,7 +138,7 @@ struct GroupFavoritesView: View {
         }
         .background(Color.ccBg)
         .toolbar(.hidden, for: .navigationBar)
-        .searchable(text: $searchText, prompt: "搜工作群收藏")
+        .searchable(text: $searchText, prompt: "搜群聊收藏")
         .onReceive(NotificationCenter.default.publisher(for: .ccGroupFavoritesDidChange)) { _ in reload() }
         .onAppear { reload() }
         .refreshable { reload() }
@@ -207,7 +207,7 @@ private struct GroupFavoritesEmptyState: View {
             Text(hasSearch ? "没有匹配收藏" : "还没有收藏")
                 .font(.ccSerifAdaptive(size: 16, weight: .semibold))
                 .foregroundStyle(Color.ccText)
-            Text(hasSearch ? "换个关键词试试。" : "在工作群消息上长按，点收藏。")
+            Text(hasSearch ? "换个关键词试试。" : "在群聊消息上长按，点收藏。")
                 .font(.ccSerifAdaptive(size: 13))
                 .foregroundStyle(Color.ccTextDim)
         }

@@ -46,6 +46,26 @@ actor GroupNetworkClient {
         return try JSONDecoder().decode(GroupRosterResponse.self, from: data)
     }
 
+    /// Build 214 T1 — 工作群输入框 调 POST /group/send 把 amian 的文字消息塞到工作群.
+    /// mentions 数组是已解析的 agent id list (di / shu / opia 等).
+    @discardableResult
+    func sendMessage(senderId: String, text: String, mentions: [String]) async throws -> Bool {
+        let url = CcServerConfig.serverURL.appendingPathComponent("group/send")
+        var request = CcServerConfig.authenticatedRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 20
+        let payload: [String: Any] = [
+            "sender_id": senderId,
+            "text": text,
+            "mentions": mentions,
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (_, response) = try await session.data(for: request)
+        try Self.validate(response: response)
+        return true
+    }
+
     func fetchPoll(since: String?, limit: Int) async throws -> GroupPollResponse {
         let url = CcServerConfig.serverURL.appendingPathComponent("group/poll")
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -131,6 +151,25 @@ final class GroupStore: ObservableObject {
         await fetchMessages(reset: false)
     }
 
+    /// Build 214 T1 — 发完立刻触发一次 pollNext 把自己消息拉回来 (无 optimistic, 简单可靠).
+    func sendUserMessage(text: String, mentions: [String]) async -> Bool {
+        do {
+            _ = try await client.sendMessage(senderId: "amian", text: text, mentions: mentions)
+            await fetchMessages(reset: false)
+            return true
+        } catch {
+            lastError = "发送失败: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    /// Agent (kind == "agent") roster — 给 @ picker / mention 解析用.
+    var agentMembers: [GroupMember] {
+        membersById.values
+            .filter { ($0.kind ?? "") == "agent" }
+            .sorted { $0.id < $1.id }
+    }
+
     private func fetchRoster() async {
         do {
             let response = try await client.fetchRoster()
@@ -144,7 +183,7 @@ final class GroupStore: ObservableObject {
             }
             lastError = nil
         } catch {
-            lastError = "工作群成员加载失败: \(error.localizedDescription)"
+            lastError = "群聊成员加载失败: \(error.localizedDescription)"
         }
     }
 
@@ -168,7 +207,7 @@ final class GroupStore: ObservableObject {
             lastError = nil
         } catch {
             loading = false
-            lastError = "工作群消息加载失败: \(error.localizedDescription)"
+            lastError = "群聊消息加载失败: \(error.localizedDescription)"
         }
     }
 
