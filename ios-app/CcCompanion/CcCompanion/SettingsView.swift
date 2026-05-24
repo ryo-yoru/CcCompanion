@@ -557,7 +557,7 @@ struct CcSettingsView: View {
         .alert("决策提示触感和声效", isPresented: $showHapticInfo) {
             Button("好") {}
         } message: {
-            Text("当群聊里 agent 标记需要你拍板（例如砥/枢 完成任务等你 review），或 ccc 检测到 ship/block/task 关键消息时，会触发一次短触感 + 提示音。\n\n关掉就只在通知中心安静收，不振不响。")
+            Text("当 Claude Code 在终端等你按 y/n 同意时（例如 proceed?、continue?、[y/n]、✏️ 编辑提示等），会触发一次短触感和提示音。帮你切到别的 App 时不漏掉 prompt。\n\n关掉就只看屏幕，不振不响。")
         }
         // Phase multi-server fallback — endpoint editor sheet
         .sheet(item: $editingEndpoint) { edit in
