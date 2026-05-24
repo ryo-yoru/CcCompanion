@@ -1,188 +1,187 @@
 # CcCompanion
 
-> Bring **Claude Code** to your iPhone. Open-source iOS client + tiny Python push server. Runs entirely on your own Mac and your own phone.
+> 把 **Claude Code** 装进口袋。开源 iOS 客户端 + 一个小 Python 推送服务。完全跑在你自己的 Mac 跟你自己的手机上。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Not affiliated with Anthropic.** "Claude" and "Claude Code" are trademarks of Anthropic, PBC. See [`DISCLAIMER.md`](DISCLAIMER.md).
+**跟 Anthropic 无关。** "Claude" 跟 "Claude Code" 是 Anthropic PBC 的商标。详见 [`DISCLAIMER.md`](DISCLAIMER.md).
 
-中文版: [README.zh.md](README.zh.md)
+English: [README.en.md](README.en.md)
 
 ---
 
-## What this is
+## 这是什么
 
-CcCompanion is two halves:
+CcCompanion 两块:
 
-1. **`ios-app/`** — a SwiftUI iOS app (TestFlight + soon App Store) that gives you a chat, terminal, and slash-command interface to your Mac's Claude Code from anywhere your iPhone is online.
-2. **`apns-server/`** — a small Python HTTP server you run on your Mac. It forwards your chat messages to a local `tmux` session running `claude`, captures the reply, and pushes it back to your iPhone via Apple Push Notifications (or [Bark](https://github.com/Finb/Bark) as a zero-Apple-Developer-required fallback).
+1. **`ios-app/`** — SwiftUI 写的 iOS app (TestFlight 公开, 后续上 App Store), 给你 chat / terminal / 斜杠命令三件套, 在 iPhone 上接你 Mac 那边的 Claude Code session, 走 overlay 网络任何地方都能用。
+2. **`apns-server/`** — Mac 上跑的 Python HTTP 服务, 把你发的 chat 转给本地 `tmux` 里的 `claude`, 抓回复, 通过 Apple Push (或者 [Bark](https://github.com/Finb/Bark) 作零 Apple Developer 兜底) 推回你 iPhone。
 
-The whole thing is **local-first** — your messages never go through our server. There is no "our server." Your Mac at home talks to your iPhone over Tailscale / ZeroTier / LAN.
+整套是 **local-first** — 你的消息不过我们的 server, 因为根本没"我们的 server"。家里那台 Mac 跟你 iPhone 走 Tailscale / ZeroTier / LAN 直连。
 
-## Features
+## 它能做什么
 
-- **Chat** — send a message from iPhone, see Claude Code's reply land back. Streaming, history, search, jump-to-message, favorites, attachments (image / file).
-- **Terminal** — inline view of the `tmux` session running `claude` on your Mac. Tap to expand. Useful for "what did claude just do?" without unlocking the Mac.
-- **Slash commands** — `/new`, `/list`, `/switch <sid>`, `/stop`, `/compact`, `/clear`, `/help`. Multi-session aware.
-- **Multi-endpoint** — chain multiple server URLs (Tailscale `100.x` + LAN `10.x` + localhost) with auto-fallback ping. Travel between networks, the app picks the live one.
-- **Polling local notifications**: when polling receives a new assistant message, the app can fire a local iOS notification for glasses and other accessories that only mirror local notifications. This is on by default and can be disabled in Settings.
-- **Remote APNs push**: build 213+ can receive server-side APNs alerts while the app is fully backgrounded or the phone is locked, provided the app bundle has Push Notifications enabled and the Mac server is configured with APNs credentials. Build 212 and earlier only provide in-app polling plus local notifications.
-- **Experimental feature flags**: new or risky app features ship behind Settings toggles first. The workgroup view is off by default and can be enabled from Settings.
-- **Onboarding wizard** — 6-step setup on first launch (server URL + secret + avatars + name + ping test).
-- **Theme** — light / dark / warm, optionally follow system.
-- **Privacy** — server `config.toml` is `.gitignore`-d, `.p8` keys live in `apns-server/secrets/` (also ignored). The repo ships with `config.example.toml` only.
+- **Chat** — iPhone 发一句, Claude Code 回的话推回来。streaming, 历史, 搜索, 跳消息, 收藏, 附件 (图片 / 文件)。
+- **Terminal** — 内嵌你 Mac 那边 `tmux` 跑 `claude` 的 session, 点开看 "claude 刚干了啥", 不用回去解锁 Mac。
+- **斜杠命令** — `/new`, `/list`, `/switch <sid>`, `/stop`, `/compact`, `/clear`, `/help`. 多 session 跟随当前 active。
+- **多 endpoint** — 一个 app 配多个 server URL (Tailscale `100.x` + LAN `10.x` + localhost), 自动 ping 切活的。换 wifi 自动跟。
+- **轮询本地通知**: 轮询拉到新 assistant 消息时, app 可以触发一次本地 iOS 通知, 给那些只能镜像本地通知的眼镜跟周边设备用。默认开, 在"设置"里能关。
+- **远程 APNs push**: build 213+ 支持服务端 APNs 推送, app 完全后台或者手机锁屏也能收。前提是 app bundle 勾了 Push Notifications, 同时 Mac 端 server 配好了 APNs 凭证。build 212 及更早只走 app 内轮询加本地通知。
+- **实验性 feature flag**: 新功能或者风险大的功能先挂在"设置"里的开关后面, 默认关。工作群 view 就是这样, 默认关, 从"设置"里打开。
+- **Onboarding wizard** — 第一次启动 6 步走完 (server URL + secret + 头像 + 名字 + ping 测试)。
+- **主题** — 浅色 / 深色 / 暖色, 可跟随系统。
+- **隐私** — `config.toml` 跟 `.p8` 都 `.gitignore`-d, repo 只放 `config.example.toml` 模板。
 
-## Requirements
+## 你需要
 
-- macOS 14 (Sonoma) or newer, with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and a working Anthropic Pro / Max subscription.
-- iPhone running iOS 18+.
-- One of: Tailscale, ZeroTier, or just LAN (if your iPhone is on the same Wi-Fi).
-- Optionally: an Apple Developer account if you want native APNs. Skip it and [Bark](https://github.com/Finb/Bark) covers the push channel.
-- **Xcode 16.3 or newer** (Swift tools 6.1+) to build the iOS app from source. Earlier Xcode versions may fail to resolve GRDB 7.10.0. If you are on Xcode ≤ 16.2, install via TestFlight instead of building from source.
+- macOS 14 (Sonoma) 或更新, 装好 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 加 Anthropic Pro / Max 订阅。
+- iPhone iOS 18+。
+- Tailscale / ZeroTier / 或者 iPhone 跟 Mac 一个 LAN 段就行。
+- 想走原生 APNs 推送需要 Apple Developer 账号 ($99/年), 不想买就走 [Bark](https://github.com/Finb/Bark), 一样能收 push 通知。
+- **Xcode 16.3 或更新** (Swift tools 6.1+) 自行 build iOS app 时需要。GRDB 7.10.0 要求 Swift tools 6.1；旧版 Xcode (≤ 16.2) resolve 可能失败。TestFlight 安装不受此限制。
 
-## Quick start
+## 快速开始
 
-If you have an AI assistant (Claude.ai / ChatGPT / Cursor / Gemini) handy, the fastest path is:
+最快路径: 复制 [`docs/AI_GUIDED_SETUP_MAC.md`](docs/AI_GUIDED_SETUP_MAC.md) 全文, 粘到你常用的 AI 助手 (Claude.ai / ChatGPT / Cursor / Gemini 都行), 在最前面加一句:
 
 ```
 请按下面这份 spec 一步一步引导我从零安装 ccc。
-
-<paste docs/AI_GUIDED_SETUP_MAC.md content here>
 ```
 
-The AI will then walk you through Phase A (prerequisites) → Phase I (common pitfalls), one step at a time.
+AI 会扮演引导员从 Phase A 走到 Phase I, 一步一步带你, 不堆问题不催。
 
-If you'd rather follow the docs yourself:
+不想走 AI 引导也可以自己读:
 
-- **macOS** → [`docs/AI_GUIDED_SETUP_MAC.md`](docs/AI_GUIDED_SETUP_MAC.md) (also doubles as a human-readable manual)
+- **macOS** → [`docs/AI_GUIDED_SETUP_MAC.md`](docs/AI_GUIDED_SETUP_MAC.md) (也能给人类直接读, 双用)
 - **Windows (WSL2)** → [`docs/SETUP_WIN_WSL2.md`](docs/SETUP_WIN_WSL2.md)
-- **Server-side details** → [`docs/SETUP_SERVER.md`](docs/SETUP_SERVER.md)
+- **服务端细节** → [`docs/SETUP_SERVER.md`](docs/SETUP_SERVER.md)
 
-For the iOS side, install via TestFlight: <https://testflight.apple.com/join/PLACEHOLDER> (link goes live with v1.0).
+iOS 端 TestFlight 装: <https://testflight.apple.com/join/PLACEHOLDER> (v1.0 上线时填)。
 
-## Architecture
+## 架构
 
 ```
               ┌──────────────────────────┐
-              │  iPhone running ccc app  │
+              │  iPhone 跑 ccc app       │
               └─────────────┬────────────┘
                             │  HTTPS poll + APNs push
-                            │  (or Bark fallback)
+                            │  (或者 Bark 兜底)
               ┌─────────────▼────────────┐
-              │  Mac running apns-server │
-              │  (Python HTTP server)    │
+              │  Mac 跑 apns-server      │
+              │  (Python HTTP 服务)      │
               └─────────────┬────────────┘
                             │  tmux send-keys / capture-pane
               ┌─────────────▼────────────┐
-              │  tmux session "cc"       │
+              │  tmux 里 session "opia"  │
               │  └ claude (CLI agent)    │
               └──────────────────────────┘
 ```
 
-Network: app and server communicate over Tailscale, ZeroTier, or LAN. The default `config.toml` binds the server to `127.0.0.1`; you bump it to `0.0.0.0` once you've configured the overlay network and the auth secret.
+网络: app 跟 server 走 Tailscale / ZeroTier / LAN 通讯。默认 `config.toml` 绑 `127.0.0.1`, 你配好 overlay 网络 + auth secret 后再改 `0.0.0.0`。
 
-## Experimental Feature Flags
+## 实验性 Feature Flag
 
-New CcCompanion features that change navigation, notifications, rendering, or agent workflows should start behind a Settings toggle backed by `@AppStorage`. The default should be off unless the feature is a compatibility or safety fix. This keeps upgrades stable for existing users while allowing local testers to opt in.
+CcCompanion 里凡是改导航 / 通知 / 渲染 / agent 工作流的新功能, 都应该先挂在"设置"里的 `@AppStorage` 开关后面。默认关, 除非这是兼容性修复或者安全修复。这样老用户升级不被打乱, 想试的本地用户自己打开。
 
-Current flag:
+当前的 flag:
 
-- `feature_group_view`: shows the 工作群 tab and polls `/group/poll` for multi-agent workgroup messages.
+- `feature_group_view`: 显示工作群 tab, 轮询 `/group/poll` 拉多 agent 协作消息。
 
-## Repository layout
+## 仓库结构
 
 ```
 CcCompanion/
-├── README.md                    ← you are here
+├── README.md                    ← 你正在看这一份
+├── README.en.md                 ← 英文版
 ├── LICENSE                      ← MIT
-├── DISCLAIMER.md                ← Anthropic trademark disclaimer
-├── .gitignore                   ← what we keep out of git (secrets / logs / build / user data)
-├── ios-app/                     ← SwiftUI iOS app (Xcode project)
-│   └── CcCompanion/           ← root Xcode workspace; build scheme `CcCompanion`
-├── apns-server/                 ← Python HTTP server (push.py is the entry point)
-│   ├── push.py                  ← main server
-│   ├── apns_client.py           ← Apple Push wrapper
-│   ├── chat_history.py          ← chat persistence
-│   ├── config.example.toml      ← config template — copy to config.toml and fill
-│   └── …                        ← see "Server modules" below
-├── docs/                        ← setup guides + Apple Developer p8 checklist + WSL2 walkthrough
-└── cccompanion-docs/            ← legacy docs (README, DISCLAIMER, etc.) kept for reference
+├── DISCLAIMER.md                ← Anthropic 商标 disclaimer
+├── .gitignore                   ← 不入 git 的清单 (secrets / logs / build / 用户数据)
+├── ios-app/                     ← SwiftUI iOS app (Xcode 工程)
+│   └── CcCompanion/           ← Xcode workspace 根; build scheme `CcCompanion`
+├── apns-server/                 ← Python HTTP 服务 (push.py 是入口)
+│   ├── push.py                  ← 主 server
+│   ├── apns_client.py           ← Apple Push 封装
+│   ├── chat_history.py          ← chat 持久化
+│   ├── config.example.toml      ← 配置模板, copy 到 config.toml 改填
+│   └── …                        ← 其它 module 见"服务模块"段
+├── docs/                        ← 安装指南 + Apple Developer p8 checklist + WSL2 流程
+└── cccompanion-docs/            ← 历史 docs (legacy README / DISCLAIMER 等) 保留参考
 ```
 
-### Server modules
+### 服务模块
 
-The server is organized into self-contained `.py` modules. The headline ones:
+server 拆成几个独立 `.py`。主要的:
 
-| Module             | What it does                                           |
-| ------------------ | ------------------------------------------------------ |
-| `push.py`          | HTTP server entry point, route handlers, APNs glue.   |
-| `apns_client.py`   | Apple Push HTTP/2 client with JWT auth.               |
-| `chat_history.py`  | Append-only message log + search index.               |
-| `token_store.py`   | Shared-secret store for write-endpoint auth.          |
-| `device_token_store.py` | Persisted iPhone device tokens for APNs.        |
-| `jwt_helper.py`    | APNs `.p8` → JWT signer.                              |
-| `task_queue.py`    | Background work pool.                                 |
-| `usage.py`         | Anthropic usage probe (optional).                      |
+| 模块                | 干啥                                            |
+| ------------------ | ----------------------------------------------- |
+| `push.py`          | HTTP server 入口, 路由 handler, APNs 调度。      |
+| `apns_client.py`   | Apple Push HTTP/2 客户端加 JWT 鉴权。            |
+| `chat_history.py`  | 消息日志 append-only + 搜索索引。                |
+| `token_store.py`   | 写接口鉴权 shared-secret 存储。                   |
+| `device_token_store.py` | iPhone APNs device token 持久化。            |
+| `jwt_helper.py`    | `.p8` 转 JWT 签名器。                             |
+| `task_queue.py`    | 后台任务池。                                     |
+| `usage.py`         | Anthropic 用量探针 (可选)。                       |
 
-Other modules (`diary`, `favorites`, `group_chat`, `rp_history`, `studyroom`, `timeline`, `todos`, `worklog`, `reminders`, `calendar_store`, `pet_state`, `tts`, `settings`, `diary_stream`, `studyroom_indexer`) implement extra endpoints the CcCompanion iOS app does not call. They're kept in-tree because removing them would fragment the import graph in `push.py`. If you build your own iOS client against this server, those endpoints are available but undocumented; treat them as experimental.
+其它模块 (`diary`, `favorites`, `group_chat`, `rp_history`, `studyroom`, `timeline`, `todos`, `worklog`, `reminders`, `calendar_store`, `pet_state`, `tts`, `settings`, `diary_stream`, `studyroom_indexer`) 是给私有客户端用的 endpoint, CcCompanion iOS app 不调它们。留在仓库里因为 `push.py` 引用了它们, 删模块会让 import graph 散架。你想拿这套 server 接你自己的客户端那些 endpoint 也能用, 但没文档支持, 当实验性看。
 
-## Build the iOS app yourself
+## 自己 build iOS app
 
-If you don't want to wait on TestFlight you can build the app directly from source:
+不想等 TestFlight 也可以直接从源码 build:
 
 ```bash
 cd ios-app/CcCompanion
 open CcCompanion.xcodeproj
-# In Xcode: select scheme "CcCompanion", configuration "CcRelease",
-#          choose your provisioning team, choose your iPhone, ⌘R.
+# Xcode 里 选 scheme "CcCompanion", configuration "CcRelease",
+#         挑你的签名 team, 接你 iPhone, 按 ⌘R.
 ```
 
-You will need to:
+你需要:
 
-- Set your own bundle identifier in the `CcCompanion` target settings (default is `com.example.cccompanion` and will conflict with anything signed by Apple).
-- Provide your own Apple Developer team for signing (free personal team works for 7-day on-device builds).
-- Enable Push Notifications for that bundle identifier if you want native APNs. The server config bundle id must match exactly, including lowercase `com.starryfield.cccompanion` style casing.
-- Run `apns-server` on a Mac that's reachable from your iPhone, with `config.toml` filled in.
+- 改自己的 bundle id (默认 `com.example.cccompanion` 跟任何 Apple 签名的 app 都冲突, 不改装不上)。
+- 提供自己的 Apple Developer team 签名 (免费 personal team 可以装 7 天 dev build)。
+- 想走原生 APNs 的话, 给这个 bundle id 在 developer.apple.com 勾上 Push Notifications。server 端 config 里的 bundle id 必须跟它完全一致, 大小写也要对 (比如 `com.starryfield.cccompanion` 这种全小写)。
+- 在一台能被 iPhone 访问到的 Mac 上跑 `apns-server`, `config.toml` 填好。
 
-## Common questions
+## 常见问题
 
-**Q: Does my data leave my Mac?**
-A: Chat messages and history live on your Mac. When the server pushes a notification, the title / body are sent through Apple's APNs (or Bark's public relay if you chose that). The chat **content** stays on your machine; only the notification preview transits Apple / Bark.
+**问: 我的数据出 Mac 吗?**
+答: chat 内容跟历史留在你 Mac 上。server 推 push 通知时 title / body 经过 Apple APNs (或者你选了 Bark 就经过 Bark relay)。chat **内容**不出机器, 只有通知预览过 Apple / Bark。
 
-**Q: Can I run this with no Apple Developer account?**
-A: Yes. Skip the `[apns]` section of `config.toml` and use [Bark](https://github.com/Finb/Bark) as the push channel. Bark is free, open-source, and runs through its author's relay (or your own self-hosted Bark instance).
+**问: 没 Apple Developer 账号能跑吗?**
+答: 能。`config.toml` 的 `[apns]` 段不填, 装 [Bark](https://github.com/Finb/Bark) 走 push。Bark 免费, 开源, 跟着作者的 relay 跑 (或者你自己部署一份 Bark)。
 
-**Q: Is it safe to expose port 8795 to the internet?**
-A: Don't. Run it behind Tailscale / ZeroTier / a reverse proxy with HTTPS + an auth secret. The default `config.toml` ships with `host = "127.0.0.1"` for a reason.
+**问: 8795 端口开到公网安全吗?**
+答: 别。后边挂 Tailscale / ZeroTier / 反向代理上 HTTPS, 加 auth secret。默认 `config.toml` 是 `host = "127.0.0.1"` 是有道理的。
 
-**Q: Why is the Xcode project under `ios-app/CcCompanion/`?**
-A: It is the public Xcode project for CcCompanion. The scheme, project folder, and bundle id are now aligned around the public name.
+**问: 为啥 Xcode 工程在 `ios-app/CcCompanion/` 下?**
+答: 这是 CcCompanion 的公开 Xcode 工程。scheme、工程目录和 bundle id 已统一到公开名称。
 
-**Q: How do I update?**
-A: `git pull`, then re-build the iOS app and (on the Mac side) restart the `apns-server` LaunchAgent: `launchctl unload ~/Library/LaunchAgents/com.user.apns-server.plist && launchctl load ~/Library/LaunchAgents/com.user.apns-server.plist`.
+**问: 怎么更新?**
+答: `git pull`, 然后重 build iOS app, Mac 端重启 `apns-server` LaunchAgent: `launchctl unload ~/Library/LaunchAgents/com.user.apns-server.plist && launchctl load ~/Library/LaunchAgents/com.user.apns-server.plist`。
 
-## Contributing
+## 贡献
 
-Issues and PRs welcome. Some areas where we'd love help:
+issue + PR 都欢迎。我们特别想要的:
 
-- Android client (matches the iOS endpoints, would be a straight port of the chat / terminal flow).
-- Reverse-proxy + HTTPS setup recipes (Caddy, Nginx, Traefik).
-- More language docs (this README is bilingual-but-English-leaning).
-- Cleanup of legacy modules in `apns-server/` that CcCompanion doesn't use.
+- Android 客户端 (跟 iOS endpoints 对齐, chat + terminal 流程平移过去)。
+- 反向代理 + HTTPS 配方 (Caddy / Nginx / Traefik)。
+- 更多语言 docs (这份 README 中英双版本, 但其它 docs 还偏英文)。
+- `apns-server/` 里那批 CcCompanion 不用的 legacy 模块清理。
 
-Before opening a PR, please:
+提 PR 之前请:
 
-1. Run `xcodebuild -project ios-app/CcCompanion/CcCompanion.xcodeproj -scheme CcCompanion -configuration CcRelease -destination 'generic/platform=iOS' build` — must succeed.
-2. Run `python3 -m py_compile apns-server/*.py` — must produce no errors.
-3. Keep secrets / `.p8` / `config.toml` / `tokens/` / `*.jsonl` out of commits (`.gitignore` already covers these).
+1. 跑 `xcodebuild -project ios-app/CcCompanion/CcCompanion.xcodeproj -scheme CcCompanion -configuration CcRelease -destination 'generic/platform=iOS' build` 必须 SUCCEEDED。
+2. 跑 `python3 -m py_compile apns-server/*.py` 不能报错。
+3. secrets / `.p8` / `config.toml` / `tokens/` / `*.jsonl` 不能进 commit (`.gitignore` 已经挡了)。
 
 ## License
 
-[MIT](LICENSE). Do whatever you want with it. If it eats your homework, that's on you, not us.
+[MIT](LICENSE). 你想拿去干啥都行。如果它把你作业吃了那是你的事不是我们的。
 
-## Acknowledgements
+## 致谢
 
-- [Anthropic](https://www.anthropic.com) for Claude and Claude Code.
-- [Apple](https://www.apple.com) for APNs and TestFlight.
-- [Bark](https://github.com/Finb/Bark) for being a brilliant zero-config push fallback.
-- Everyone who tested early TestFlight builds and filed bug reports.
+- [Anthropic](https://www.anthropic.com) — Claude 跟 Claude Code。
+- [Apple](https://www.apple.com) — APNs 跟 TestFlight。
+- [Bark](https://github.com/Finb/Bark) — 极佳的零配置 push 兜底方案。
+- 所有测过 TestFlight 早期版本跟提过 bug 的人。
