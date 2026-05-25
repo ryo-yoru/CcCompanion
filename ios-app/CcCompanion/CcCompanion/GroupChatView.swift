@@ -383,7 +383,7 @@ struct GroupChatView: View {
             )
             .sheet(isPresented: $pendingAgentPicker) {
                 AgentMentionPicker(
-                members: store.agentMembers,
+                    members: mentionPickerMembers,
                 onPick: { member in
                     if !pendingMentions.contains(member.id) {
                         pendingMentions.append(member.id)
@@ -401,7 +401,7 @@ struct GroupChatView: View {
         }
         .sheet(isPresented: $showAgentPicker) {
             AgentMentionPicker(
-                members: store.agentMembers,
+                members: mentionPickerMembers,
                 onPick: { member in
                     insertMention(member: member)
                     addDraftMention(member.id)
@@ -544,6 +544,47 @@ struct GroupChatView: View {
         }
     }
 
+    private var hardcodedMentionMembers: [GroupMember] {
+        [
+            GroupMember(
+                id: "mimo",
+                displayName: "Mipia",
+                kind: "agent",
+                avatar: "M",
+                color: "purple",
+                model: "MiMo CLI",
+                tmux: "mimo",
+                canReply: true,
+                optional: true
+            )
+        ]
+    }
+
+    private var mentionPickerMembers: [GroupMember] {
+        var seen = Set<String>()
+        var result: [GroupMember] = []
+
+        func append(_ member: GroupMember) {
+            guard !GroupMemberRemovalsStore.isRemoved(member.id), !seen.contains(member.id) else { return }
+            seen.insert(member.id)
+            result.append(member)
+        }
+
+        store.agentMembers.forEach(append)
+        hardcodedMentionMembers.forEach(append)
+        return result.sorted {
+            $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+        }
+    }
+
+    private var clientMentionAliases: [String: String] {
+        [
+            "mimo": "mimo",
+            "mipia": "mimo",
+            "q": "mimo",
+        ]
+    }
+
     private func addDraftMention(_ id: String) {
         guard !draftMentionIds.contains(id) else { return }
         draftMentionIds.append(id)
@@ -615,14 +656,36 @@ struct GroupChatView: View {
         let nsText = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
         var hits: [String] = []
-        let agents = store.agentMembers
         for m in matches where m.numberOfRanges >= 2 {
             let token = nsText.substring(with: m.range(at: 1))
-            if let hit = agents.first(where: { $0.displayName == token || $0.id == token || $0.title == token }) {
-                if !hits.contains(hit.id) { hits.append(hit.id) }
-            }
+            guard let id = resolveMentionId(for: token), !hits.contains(id) else { continue }
+            hits.append(id)
         }
         return hits
+    }
+
+    private func resolveMentionId(for token: String) -> String? {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+        guard !trimmed.isEmpty else { return nil }
+        let normalized = trimmed.lowercased()
+        if normalized == "all" { return "__all__" }
+        if let alias = clientMentionAliases[normalized] { return alias }
+        if let member = mentionPickerMembers.first(where: { matchesMentionToken(member: $0, token: trimmed, normalized: normalized) }) {
+            return member.id
+        }
+        if let member = store.mentionMember(for: trimmed) {
+            return member.id
+        }
+        return nil
+    }
+
+    private func matchesMentionToken(member: GroupMember, token: String, normalized: String) -> Bool {
+        member.id == token
+            || member.id.lowercased() == normalized
+            || member.displayName == token
+            || member.displayName.lowercased() == normalized
+            || member.title == token
+            || member.title.lowercased() == normalized
     }
 
     private func mergedMentions(text: String, explicit: [String]) -> [String] {
