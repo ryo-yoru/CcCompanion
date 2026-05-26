@@ -346,6 +346,8 @@ class ServerState:
             server_cfg.get("thinking_log_path") or (HERE / "state" / "thinking_log.jsonl")
         )
         self.thinking = ThinkingStore(thinking_log_path)
+        # 终端 session 自定义顺序 (2026-05-26 build226). 用户在 iOS Settings 拖动调序后持久化这里。
+        self.session_order_path = HERE / "state" / "session_order.json"
         group_chat_path = Path(self.token_store_path).parent / "group_chat.jsonl"
         group_state_path = Path(self.token_store_path).parent / "group_state.json"
         self.group_chat = GroupChatStore(group_chat_path, group_state_path)
@@ -736,6 +738,12 @@ class PushHandler(BaseHTTPRequestHandler):
                 return
             self._handle_tmux_capture()
             return
+        if self.path == "/tmux/sessions/order":
+            if not self.state.allow_remote_control:
+                self._send_json(403, {"error": "remote_control disabled"})
+                return
+            self._handle_tmux_sessions_order_get()
+            return
         if self.path == "/tmux/sessions":
             if not self.state.allow_remote_control:
                 self._send_json(403, {"error": "remote_control disabled"})
@@ -1070,6 +1078,12 @@ class PushHandler(BaseHTTPRequestHandler):
             self._handle_todos_add(body)
         elif self.path == "/todos/edit":
             self._handle_todos_edit(body)
+        elif self.path == "/tmux/sessions/order":
+            # build226: 持久化用户自定义 session 顺序
+            if not self.state.allow_remote_control:
+                self._send_json(403, {"error": "remote_control disabled"})
+                return
+            self._handle_tmux_sessions_order_set(body)
         elif self.path == "/tmux/send":
             # P0-2: direct tmux send-keys — remote control gate
             if not self.state.allow_remote_control:
@@ -4372,6 +4386,27 @@ class PushHandler(BaseHTTPRequestHandler):
 
     # ---------- tmux 终端 endpoints ----------
 
+    def _read_session_order(self) -> list:
+        """读用户保存的 session 顺序 (list[str])。无 / 坏文件返回 []。"""
+        try:
+            p = self.state.session_order_path
+            if p.exists():
+                data = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    return [s for s in data if isinstance(s, str)]
+        except Exception:
+            pass
+        return []
+
+    def _apply_session_order(self, sessions: list) -> list:
+        """按 saved order 重排: saved 里有的按 saved 顺序在前 (且当前真存在), 其余按 tmux 原序排尾。"""
+        saved = self._read_session_order()
+        present = set(sessions)
+        ordered = [s for s in saved if s in present]
+        ordered_set = set(ordered)
+        tail = [s for s in sessions if s not in ordered_set]  # saved 没覆盖的新 session 排尾保 tmux 原序
+        return ordered + tail
+
     def _handle_tmux_sessions(self):
         try:
             result = subprocess.run(
@@ -4379,7 +4414,24 @@ class PushHandler(BaseHTTPRequestHandler):
                 capture_output=True, text=True, timeout=3
             )
             sessions = [s.strip() for s in result.stdout.split("\n") if s.strip()]
+            sessions = self._apply_session_order(sessions)
             self._send_json(200, {"ok": True, "sessions": sessions})
+        except Exception as e:
+            self._send_json(500, {"error": str(e)})
+
+    def _handle_tmux_sessions_order_get(self):
+        self._send_json(200, {"ok": True, "order": self._read_session_order()})
+
+    def _handle_tmux_sessions_order_set(self, body: dict[str, Any]):
+        order = body.get("order")
+        if not isinstance(order, list) or not all(isinstance(s, str) for s in order):
+            self._send_json(400, {"error": "order must be a list of strings"})
+            return
+        try:
+            p = self.state.session_order_path
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(order, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._send_json(200, {"ok": True, "order": order})
         except Exception as e:
             self._send_json(500, {"error": str(e)})
 
