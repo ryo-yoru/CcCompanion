@@ -652,7 +652,8 @@ final class ChatViewModel: ObservableObject {
             forName: .ccThinkingPending, object: nil, queue: .main
         ) { [weak self] note in
             guard let tid = note.userInfo?["turn_id"] as? String, !tid.isEmpty else { return }
-            Task { @MainActor in self?.fetchThinkingForTurn(tid) }
+            // force: silent push 代表 server 此刻已有这条 thinking, 即使 poll 路已 give-up 也要补拉.
+            Task { @MainActor in self?.fetchThinkingForTurn(tid, force: true) }
         }
     }
     @Published private(set) var visibleLimit: Int = 300 { didSet { rebuildDisplayedRowsCache() } }
@@ -1058,16 +1059,24 @@ final class ChatViewModel: ObservableObject {
         for tid in Set(turnIds) { fetchThinkingForTurn(tid) }
     }
 
-    // 单 turn 拉 thinking, 带短退避重试. silent push handler 也调这条 (按 payload turn_id, 不依赖 chat record).
-    // build 223 修竞态: chat record 常先于 chain POST thinking 到达, 第一次 GET 会空.
-    // 空结果**不**标 fetched, 1s/2s/5s 退避重试三次再 give up; 拿到非空才永久标 fetched.
-    func fetchThinkingForTurn(_ tid: String) {
+    // 单 turn 拉 thinking, 带长退避重试. silent push handler 也调这条 (按 payload turn_id, 不依赖 chat record).
+    // build 227 修竞态根因 (旁白方案 livefix):
+    //   现象: thinking 已落库 + UI 好的, 但卡片不冒. 真因两条耦合:
+    //   ① thinking 是 chain Stop hook 收尾才 POST, 比消息气泡晚到 ~30s; 旧退避 [0,1,2,5]=8s 窗在数据落库前就跑完.
+    //   ② 退避耗尽 give up 时把 tid 标进 thinkingFetchedTurns — 跟"成功"用同一个 set — 于是随后 silent push 到达,
+    //      observer 调到这里, line guard 见 fetchedTurns.contains(tid) 直接短路, push 永远救不回这条 turn.
+    //   实测: silent push 对有效 token PROD status=200 真送达, 所以问题不在 push 没到, 在到了被 give-up 标记挡掉.
+    //   修法: ① 退避窗拉到累计 ~89s 覆盖晚到 30s 的窗 (不靠 push 也自愈); ② push 走 force=true 清掉 give-up 标记补拉.
+    func fetchThinkingForTurn(_ tid: String, force: Bool = false) {
         guard !tid.isEmpty else { return }
-        // 已成功拉到 / 已在重试中 → 不重复起循环.
-        if thinkingByTurn[tid] != nil || thinkingFetchedTurns.contains(tid) || thinkingInFlightTurns.contains(tid) { return }
+        if thinkingByTurn[tid] != nil { return }          // 已成功拉到 → 不重复
+        // silent push 代表"server 此刻已有这条 thinking" → 即使 poll 路已 give-up 也允许重新拉.
+        if force { thinkingFetchedTurns.remove(tid) }
+        if thinkingFetchedTurns.contains(tid) || thinkingInFlightTurns.contains(tid) { return }
         thinkingInFlightTurns.insert(tid)
         Task { [weak self] in
-            let delays: [UInt64] = [0, 1_000_000_000, 2_000_000_000, 5_000_000_000] // 即刻 + 1s/2s/5s
+            // 退避累计 ~89s: 0,1,3,6,11,19,29,44,64,89s — 在 thinking 晚到 ~30s 前后多次 catch, 不靠 flaky push.
+            let delays: [UInt64] = [0, 1, 2, 3, 5, 8, 10, 15, 20, 25].map { UInt64($0) * 1_000_000_000 }
             for (i, delay) in delays.enumerated() {
                 if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
                 if let text = await ChatNetworkClient.shared.fetchThinking(turnId: tid) {
@@ -1078,7 +1087,7 @@ final class ChatViewModel: ObservableObject {
                     }
                     return
                 }
-                // 空: 最后一次仍空 → give up (标 fetched 停重试), 否则继续退避.
+                // 退避耗尽仍空 → 标 give-up 停 poll 循环 (防无限轮询); silent push 可用 force 重置再拉.
                 if i == delays.count - 1 {
                     await MainActor.run {
                         self?.thinkingFetchedTurns.insert(tid)
