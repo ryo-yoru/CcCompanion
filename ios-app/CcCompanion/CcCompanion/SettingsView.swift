@@ -358,6 +358,7 @@ struct CcSettingsView: View {
     @State private var showHapticInfo: Bool = false
     // Build 215 S2 — 群聊编辑 sheet 状态
     @State private var showGroupSettingsEdit: Bool = false
+    @State private var showSessionOrder: Bool = false  // build226 终端 session 调序
     // Build 215 S1 — 群聊背景 PHPicker state
     @State private var groupBgPickerPresented: Bool = false
     @State private var groupBgRefreshTick: Int = 0
@@ -491,6 +492,29 @@ struct CcSettingsView: View {
                     }
                 }
 
+                // 终端 session 顺序 (build226) — 拖动自定义终端 tab 的 session 排序
+                section("终端") {
+                    Button {
+                        showSessionOrder = true
+                    } label: {
+                        HStack {
+                            Text("session 顺序")
+                                .font(.ccSerifAdaptive(size: 15))
+                                .foregroundStyle(Color.ccText)
+                            Spacer()
+                            Text("拖动调序")
+                                .font(.system(.callout, design: .monospaced))
+                                .foregroundStyle(Color.ccTextDim)
+                            Image(systemName: "chevron.right")
+                                .font(.ccSerifAdaptive(size: 12))
+                                .foregroundStyle(Color.ccTextDim)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 // Group 7 FEATURES (大砍版)
                 section("FEATURES") {
                     toggleRow("仿ClaudeCode趣味Thinking文字", binding: $typingVerbsEnabled)
@@ -589,6 +613,10 @@ struct CcSettingsView: View {
             Button("好") {}
         } message: {
             Text("当 Claude Code 在终端等你按 y/n 同意时（例如 proceed?、continue?、[y/n]、✏️ 编辑提示等），会触发一次短触感和提示音。帮你切到别的 App 时不漏掉 prompt。\n\n关掉就只看屏幕，不振不响。")
+        }
+        // build226 — 终端 session 调序 sheet
+        .sheet(isPresented: $showSessionOrder) {
+            TerminalSessionOrderView()
         }
         // Build 215 S2 — 群聊编辑 sheet (头像 + 名称 同时编辑, 保存才落)
         .sheet(isPresented: $showGroupSettingsEdit) {
@@ -2038,6 +2066,119 @@ enum GroupMemberSyncClient {
             return SyncResult(ok: true, detail: "")
         } catch {
             return SyncResult(ok: false, detail: "后端\(action)网络错: \(error.localizedDescription)")
+        }
+    }
+}
+
+// build226 — 终端 session 顺序调序视图. 拖动重排 → 保存 POST /tmux/sessions/order.
+// 服务端 /tmux/sessions 之后按 saved order 返回, 终端 tab 第一个即默认 session.
+struct TerminalSessionOrderView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var sessions: [String] = []
+    @State private var loading: Bool = true
+    @State private var saving: Bool = false
+    @State private var toast: String? = nil
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if loading {
+                    ProgressView("加载中…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if sessions.isEmpty {
+                    Text("没有可调序的 session")
+                        .foregroundStyle(Color.ccTextDim)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        Section {
+                            ForEach(sessions, id: \.self) { s in
+                                HStack {
+                                    Image(systemName: "line.3.horizontal")
+                                        .foregroundStyle(Color.ccTextDim)
+                                    Text(s)
+                                        .font(.system(.body, design: .monospaced))
+                                }
+                            }
+                            .onMove { from, to in
+                                sessions.move(fromOffsets: from, toOffset: to)
+                            }
+                        } header: {
+                            Text("拖动右侧把手调整顺序，第一个即终端默认 session")
+                        }
+                    }
+                    .environment(\.editMode, .constant(.active))
+                }
+            }
+            .navigationTitle("终端 session 顺序")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(saving ? "保存中…" : "保存") {
+                        Task { await save() }
+                    }
+                    .disabled(saving || sessions.isEmpty)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if let t = toast {
+                    Text(t)
+                        .font(.ccSerifAdaptive(size: 13))
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(Color.ccCard)
+                        .foregroundStyle(Color.ccAccent)
+                        .clipShape(Capsule())
+                        .padding(.bottom, 24)
+                }
+            }
+            .task { await load() }
+        }
+    }
+
+    private func load() async {
+        loading = true
+        // /tmux/sessions 已按 saved order 返回, 直接用它当当前顺序展示。
+        let url = CcServerConfig.serverURL.appendingPathComponent("tmux/sessions")
+        do {
+            let (data, _) = try await URLSession.shared.data(for: CcServerConfig.authenticatedRequest(url: url))
+            if let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let arr = obj["sessions"] as? [String] {
+                sessions = arr
+            }
+        } catch {
+            // 静默
+        }
+        loading = false
+    }
+
+    private func save() async {
+        saving = true
+        defer { saving = false }
+        let url = CcServerConfig.serverURL.appendingPathComponent("tmux/sessions/order")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let secret = CcServerConfig.sharedSecret, !secret.isEmpty {
+            req.setValue(secret, forHTTPHeaderField: "X-Auth-Token")
+        }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["order": sessions])
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if (200...299).contains(code),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               obj["ok"] as? Bool == true {
+                toast = "已保存"
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                dismiss()
+            } else {
+                toast = "保存失败 (\(code))"
+            }
+        } catch {
+            toast = "保存失败: \(error.localizedDescription)"
         }
     }
 }
