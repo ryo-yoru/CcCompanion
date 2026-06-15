@@ -138,43 +138,61 @@ if [ -z "$LAST_ASSISTANT" ]; then
     exit 0
 fi
 
-# POST 到 /chat/append
-PAYLOAD=$(ASSISTANT_TEXT="$LAST_ASSISTANT" python3 -c '
-import json, os, datetime
-ts = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-print(json.dumps({
-    "role": "assistant",
-    "text": os.environ["ASSISTANT_TEXT"],
-    "source": "ccc-stop-hook",
-    "ts": ts,
-}))
-')
+# POST 到 /chat/append — 按双换行分段, 每段一条消息
+# python3 一次性完成: 分段 → 合并超短段 → 逐段 POST (带 retry) → 最后一段 response 写 curlout
+HTTP_CODE=$(ASSISTANT_TEXT="$LAST_ASSISTANT" SERVER_URL="$SERVER_URL" AUTH_TOKEN="$AUTH_TOKEN" python3 -c '
+import json, os, time, datetime, urllib.request, urllib.error, sys
 
-# retry transient network errors (000/502/503/504), don't retry 401 (auth)
-attempt=0
-while [ $attempt -lt 3 ]; do
-    HTTP_CODE=$(curl -s -o /tmp/ccc_stop_hook.curlout -w "%{http_code}" \
-        -X POST "$SERVER_URL/chat/append" \
-        -H "Content-Type: application/json" \
-        -H "X-Auth-Token: $AUTH_TOKEN" \
-        --data "$PAYLOAD" \
-        --max-time 8 2>>"$LOG_PATH")
-    case "$HTTP_CODE" in
-        200) break ;;
-        000|502|503|504)
-            attempt=$((attempt + 1))
-            log "POST retry $attempt http=$HTTP_CODE"
-            sleep 1
-            ;;
-        401)
-            log "POST 401 unauthorized — check CCC_AUTH_TOKEN or ~/.ots/secret matches server config.toml shared_secret"
+text = os.environ["ASSISTANT_TEXT"]
+server = os.environ["SERVER_URL"]
+token = os.environ["AUTH_TOKEN"]
+
+# 分段: 按双换行拆, 过滤空段
+segs = [s.strip() for s in text.split("\n\n") if s.strip()]
+if not segs:
+    segs = [text]
+# 合并超短段 (<=30 字符) 到前一段, 避免过度碎片
+merged = []
+for s in segs:
+    if merged and len(s) <= 30:
+        merged[-1] += "\n\n" + s
+    else:
+        merged.append(s)
+segs = merged
+
+last_code = 0
+for i, seg in enumerate(segs):
+    ts = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00","Z")
+    rec = {"role":"assistant","text":seg,"source":"ccc-stop-hook","ts":ts}
+    if i < len(segs) - 1:
+        rec["silent"] = True  # 非末段不触发 APNs 推送
+    payload = json.dumps(rec).encode()
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(f"{server}/chat/append", data=payload,
+                headers={"Content-Type":"application/json","X-Auth-Token":token}, method="POST")
+            resp = urllib.request.urlopen(req, timeout=8)
+            body = resp.read()
+            last_code = resp.status
             break
-            ;;
-        *)
-            break
-            ;;
-    esac
-done
+        except urllib.error.HTTPError as e:
+            last_code = e.code
+            body = e.read()
+            if last_code == 401:
+                break
+            time.sleep(1)
+        except Exception:
+            last_code = 0
+            body = b""
+            time.sleep(1)
+    # 最后一段的 response 写给 thinking card 用
+    if i == len(segs) - 1:
+        with open("/tmp/ccc_stop_hook.curlout","wb") as f:
+            f.write(body if isinstance(body, bytes) else body.encode())
+    if i < len(segs) - 1 and last_code == 200:
+        time.sleep(0.15)  # 段间微延迟保证 ts 递增
+print(last_code)
+' 2>>"$LOG_PATH")
 
 if [ "$HTTP_CODE" = "200" ]; then
     log "posted to /chat/append ok (chars=${#LAST_ASSISTANT})"

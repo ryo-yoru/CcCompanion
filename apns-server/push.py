@@ -113,53 +113,334 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cc Chat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="家">
+<meta name="theme-color" content="#F5F0E8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1816" media="(prefers-color-scheme: dark)">
+<title>家</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; }
-  body { background: #1E1E1E; color: #fff; font: 14px -apple-system, "PingFang SC", "Segoe UI", system-ui, sans-serif; display: flex; flex-direction: column; }
-  header { padding: 10px 16px; background: #111; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 8px; }
-  header .dot { width: 8px; height: 8px; border-radius: 50%; background: #5cff7e; }
-  header .title { font-weight: 600; }
-  header .meta { color: #888; font-size: 12px; margin-left: auto; }
-  #log { flex: 1; overflow-y: auto; padding: 16px; }
-  .row { margin: 8px 0; max-width: 80%; line-height: 1.5; }
+  :root {
+    --bg: #F5F0E8;
+    --top: #EDE7DC;
+    --card: #FAF7F2;
+    --border: #DDD6C8;
+    --text-1: #2C2520;
+    --text-2: #6B6055;
+    --text-3: #A09585;
+    --amber: #C4956A;
+    --amber-deep: #A87E5C;
+    --green: #7A9A7A;
+    --red: #B85959;
+    --input-bg: #fff;
+    --term-bg: #2C2520;
+    --term-text: #E8DFD0;
+  }
+  html.dark {
+    --bg: #1A1816;
+    --top: #252220;
+    --card: #2A2622;
+    --border: #3A352F;
+    --text-1: #E8E0D4;
+    --text-2: #B5A99A;
+    --text-3: #7B7164;
+    --amber: #C4956A;
+    --amber-deep: #DBA77E;
+    --green: #8FB28F;
+    --red: #C77878;
+    --input-bg: #2A2622;
+    --term-bg: #110F0E;
+    --term-text: #D4C8B5;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overscroll-behavior: none; }
+  body {
+    background: var(--bg); color: var(--text-1);
+    font: 16px/1.6 'Noto Sans SC','PingFang SC',-apple-system,sans-serif;
+    display: flex; flex-direction: column;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    transition: background 0.2s, color 0.2s;
+  }
+  header {
+    padding: 12px 18px; background: var(--top);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  header .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  header .title { font-weight: 500; font-size: 15px; color: var(--text-1); letter-spacing: 0.02em; }
+  header .meta { color: var(--text-3); font-size: 11px; margin-left: auto; font-variant-numeric: tabular-nums; }
+  header .icon-btn {
+    background: transparent; border: 0; cursor: pointer;
+    color: var(--text-2); font-size: 16px;
+    width: 28px; height: 28px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0;
+  }
+  header .icon-btn:active { background: var(--card); }
+
+  /* tab 切换 */
+  .tabs {
+    display: flex; gap: 4px;
+    padding: 6px 10px 0;
+    background: var(--top);
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    background: transparent; border: 0;
+    padding: 8px 14px;
+    color: var(--text-3); font-size: 13px; font-weight: 500;
+    cursor: pointer; border-radius: 0;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .tab.active { color: var(--amber); border-bottom-color: var(--amber); }
+
+  .panel { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+  .panel.active { display: flex; }
+
+  /* chat 面板 */
+  #log {
+    flex: 1; overflow-y: auto;
+    padding: 20px 16px 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .row { margin: 14px 0; max-width: 88%; line-height: 1.7; }
   .row.user { margin-left: auto; }
-  .row .who { font-size: 11px; color: #888; margin-bottom: 2px; }
-  .row.user .who { text-align: right; }
-  .bubble { padding: 8px 12px; border-radius: 10px; word-wrap: break-word; white-space: pre-wrap; }
-  .row.assistant .bubble { background: #2a2a2a; color: #fff; }
-  .row.user .bubble { background: #d96d36; color: #fff; }
-  .row .ts { font-size: 10px; color: #666; margin-top: 2px; }
+  .bubble {
+    padding: 11px 15px; border-radius: 18px;
+    word-wrap: break-word; white-space: pre-wrap;
+    font-size: 15.5px;
+    border: 0;
+  }
+  .row.assistant .bubble {
+    background: var(--card); color: var(--text-1);
+    border-bottom-left-radius: 6px;
+  }
+  .row.user .bubble {
+    background: var(--amber); color: #fff;
+    border-bottom-right-radius: 6px;
+  }
+  .row .ts {
+    font-size: 10.5px; color: var(--text-3);
+    margin-top: 4px; padding: 0 6px;
+    font-variant-numeric: tabular-nums;
+  }
   .row.user .ts { text-align: right; }
-  footer { padding: 10px; background: #111; border-top: 1px solid #333; display: flex; gap: 8px; }
-  textarea { flex: 1; background: #222; color: #fff; border: 1px solid #333; border-radius: 6px; padding: 8px; font: inherit; resize: none; min-height: 38px; max-height: 120px; }
-  button { background: #d96d36; color: #fff; border: 0; border-radius: 6px; padding: 0 18px; font: inherit; cursor: pointer; }
-  button:disabled { opacity: .4; cursor: default; }
-  .empty { text-align: center; color: #666; padding: 40px; }
+  footer {
+    padding: 10px 12px 12px; background: var(--top);
+    border-top: 1px solid var(--border);
+    display: flex; gap: 8px; align-items: flex-end;
+  }
+  textarea {
+    flex: 1;
+    background: var(--input-bg); color: var(--text-1);
+    border: 1px solid var(--border); border-radius: 18px;
+    padding: 10px 16px;
+    font: inherit; font-size: 16px;
+    resize: none; min-height: 40px; max-height: 140px;
+    outline: none;
+    line-height: 1.5;
+  }
+  textarea:focus { border-color: var(--amber); }
+  button.send, button.plus {
+    border: 0; border-radius: 50%;
+    width: 40px; height: 40px;
+    font-size: 22px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.15s;
+    padding: 0;
+  }
+  button.send { background: var(--amber); color: #fff; font-size: 18px; }
+  button.send:hover, button.send:active { background: var(--amber-deep); }
+  button.send:disabled { opacity: .4; cursor: default; }
+  button.plus {
+    background: var(--card); color: var(--text-2);
+    border: 1px solid var(--border);
+    line-height: 1;
+  }
+  button.plus:active { background: var(--border); }
+  button.plus:disabled { opacity: .4; cursor: default; }
+  /* 待发附件预览 */
+  #pending { padding: 8px 12px; background: var(--top); border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; }
+  #pending img { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; }
+  #pending .pname { flex: 1; font-size: 13px; color: var(--text-2); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  #pending .pcancel { background: transparent; border: 0; color: var(--text-3);
+    font-size: 18px; cursor: pointer; width: 28px; height: 28px; }
+  #pending .pfileicon { font-size: 28px; }
+  .empty {
+    text-align: center; color: var(--text-3);
+    padding: 60px 20px; font-size: 14px;
+  }
+
+  /* terminal 面板 — 只读 */
+  #term-wrap {
+    flex: 1; overflow-y: auto;
+    background: var(--term-bg);
+    padding: 16px;
+    -webkit-overflow-scrolling: touch;
+  }
+  #term {
+    color: var(--term-text);
+    font: 11px/1.5 'SF Mono', Menlo, Monaco, monospace;
+    /* 手机窄屏:自动折行,不横向溢出 */
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow-wrap: anywhere;
+  }
+  @media (min-width: 600px) {
+    #term { font-size: 12px; white-space: pre; word-break: normal; }
+    #term-wrap { overflow-x: auto; }
+  }
+  .term-note {
+    padding: 10px 16px;
+    background: var(--top);
+    color: var(--text-3);
+    font-size: 11px;
+    border-top: 1px solid var(--border);
+    text-align: center;
+  }
+
+  /* token 缺失提示 */
+  #token-form {
+    margin: 60px auto; max-width: 320px; padding: 24px;
+    background: var(--card); border-radius: 14px;
+    border: 1px solid var(--border);
+    text-align: center;
+  }
+  #token-form h3 { font-size: 15px; font-weight: 500; margin-bottom: 8px; }
+  #token-form p { font-size: 12px; color: var(--text-3); margin-bottom: 14px; line-height: 1.55; }
+  #token-form input {
+    width: 100%; padding: 10px 14px;
+    background: var(--input-bg); color: var(--text-1);
+    border: 1px solid var(--border); border-radius: 10px;
+    font: inherit; font-size: 14px;
+    outline: none; margin-bottom: 10px;
+  }
+  #token-form button {
+    width: 100%; padding: 10px;
+    background: var(--amber); color: #fff;
+    border: 0; border-radius: 10px;
+    font: inherit; font-size: 14px;
+    cursor: pointer;
+  }
+
+  /* 滚动条收敛 */
+  #log::-webkit-scrollbar, #term-wrap::-webkit-scrollbar { width: 0; background: transparent; }
 </style>
 </head>
 <body>
 <header>
   <span class="dot" id="dot"></span>
-  <span class="title">Cc · Web Chat</span>
-  <span class="meta" id="meta">加载中...</span>
+  <span class="title">家</span>
+  <span class="meta" id="meta">连接中</span>
+  <button class="icon-btn" id="notifyBtn" aria-label="开启通知" title="开启通知">🔔</button>
+  <button class="icon-btn" id="themeBtn" aria-label="切换深浅" title="切换深浅">◐</button>
 </header>
-<main id="log"><div class="empty">连接中...</div></main>
-<footer>
-  <textarea id="input" placeholder="发消息给 Cc (Cmd/Ctrl + Enter 发送)" rows="1"></textarea>
-  <button id="send">发送</button>
-</footer>
+<div class="tabs">
+  <button class="tab active" data-tab="chat">对话</button>
+  <button class="tab" data-tab="term">小十现场</button>
+</div>
+
+<div class="panel active" id="panel-chat">
+  <main id="log"><div class="empty">…</div></main>
+  <div id="pending" style="display:none;"></div>
+  <footer>
+    <button class="plus" id="plus" aria-label="附件">+</button>
+    <input type="file" id="fileIn" style="display:none">
+    <textarea id="input" placeholder="说点什么" rows="1"></textarea>
+    <button class="send" id="send" aria-label="发送">↑</button>
+  </footer>
+</div>
+
+<div class="panel" id="panel-term">
+  <div id="term-wrap"><pre id="term">…</pre></div>
+  <div class="term-note">只读视图 · 2 秒刷新一次 · 不可输入,只能看小十在做什么</div>
+</div>
 <script>
+  // 主题切换:先看 localStorage,再看系统,默认浅色
+  function applyTheme() {
+    let theme = '';
+    try { theme = localStorage.getItem('ccc_theme') || ''; } catch(e){}
+    if (!theme) theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    document.getElementById('themeBtn').textContent = theme === 'dark' ? '☀' : '◐';
+  }
+  applyTheme();
+  document.getElementById('themeBtn').addEventListener('click', () => {
+    const isDark = document.documentElement.classList.contains('dark');
+    const next = isDark ? 'light' : 'dark';
+    try { localStorage.setItem('ccc_theme', next); } catch(e){}
+    applyTheme();
+  });
+
+  // ---- 消息通知(Web Notification API)----
+  function refreshBell() {
+    const btn = document.getElementById('notifyBtn');
+    if (!('Notification' in window)) { btn.style.display = 'none'; return; }
+    btn.textContent = Notification.permission === 'granted' ? '🔔' : '🔕';
+    btn.title = Notification.permission === 'granted' ? '通知已开' : '点开启通知';
+  }
+  refreshBell();
+  document.getElementById('notifyBtn').addEventListener('click', async () => {
+    if (!('Notification' in window)) { alert('这个浏览器不支持通知'); return; }
+    if (Notification.permission === 'granted') {
+      new Notification('家', { body: '通知已经是开的啦' });
+    } else {
+      const p = await Notification.requestPermission();
+      if (p !== 'granted') alert('没拿到通知权限。\niPhone 需要:先把这个页面"添加到主屏幕",从主屏幕图标打开,再点🔔开启(需要 iOS 16.4+)。');
+    }
+    refreshBell();
+  });
+  function notify(text) {
+    try {
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+      if (!document.hidden) return;  // 页面在前台就不弹,你已经在看了
+      const n = new Notification('家 · 小十', { body: text.slice(0, 120), tag: 'ccc-msg', renotify: true });
+      n.onclick = () => { window.focus(); n.close(); };
+    } catch(e) {}
+  }
+
+  // 没 token 就提示用户粘
+  if (!AUTH_TOKEN) {
+    document.querySelector('main#log').innerHTML =
+      '<div id="token-form"><h3>需要一次性放钥匙</h3>' +
+      '<p>主屏幕首次进入时 Safari 没带 token。把控制台地址栏 token= 后那段粘进来,后续刷新自动记住。</p>' +
+      '<input type="password" id="tokIn" placeholder="32 位 secret" autocapitalize="off" autocorrect="off">' +
+      '<button onclick="saveTok()">记住</button></div>';
+    window.saveTok = function() {
+      const v = document.getElementById('tokIn').value.trim();
+      if (!v) return;
+      try { localStorage.setItem('ccc_auth', v); } catch(e){}
+      location.reload();
+    };
+  }
+
   const log = document.getElementById('log');
   const meta = document.getElementById('meta');
   const dot = document.getElementById('dot');
   const input = document.getElementById('input');
   const sendBtn = document.getElementById('send');
+  const termEl = document.getElementById('term');
   let lastTs = null;
   let seenKeys = new Set();
   let firstLoad = true;
+  let currentTab = 'chat';
+
+  // tab 切换
+  document.querySelectorAll('.tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentTab = btn.dataset.tab;
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('panel-' + currentTab).classList.add('active');
+      if (currentTab === 'term') pollTerm();
+    });
+  });
 
   function fmtTime(ts) {
     if (!ts) return '';
@@ -176,25 +457,40 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
     seenKeys.add(key);
     const row = document.createElement('div');
     row.className = 'row ' + (r.role === 'user' ? 'user' : 'assistant');
-    const who = document.createElement('div');
-    who.className = 'who';
-    who.textContent = r.role === 'user' ? '你' : 'Cc';
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     bubble.textContent = r.text || '';
     const ts = document.createElement('div');
     ts.className = 'ts';
     ts.textContent = fmtTime(r.ts);
-    row.appendChild(who); row.appendChild(bubble); row.appendChild(ts);
+    row.appendChild(bubble); row.appendChild(ts);
     log.appendChild(row);
   }
 
+  // 输入框自动撑高 — 撑高会挤压消息区,若原本贴底就把消息拉回底部,避免"跳"
+  if (input) input.addEventListener('input', () => {
+    const wasAtBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 140) + 'px';
+    if (wasAtBottom) log.scrollTop = log.scrollHeight;
+  });
+
+  function authFetch(url, opts) {
+    opts = opts || {};
+    const headers = Object.assign({}, opts.headers || {});
+    if (AUTH_TOKEN) headers['X-Auth-Token'] = AUTH_TOKEN;
+    return fetch(url, Object.assign({}, opts, { cache: 'no-store', headers }));
+  }
+
   async function poll() {
+    if (!AUTH_TOKEN) return;
     try {
       const url = lastTs ? '/chat/history?since=' + encodeURIComponent(lastTs) : '/chat/history?limit=200';
-      const res = await fetch(url, { cache: 'no-store' });
+      const res = await authFetch(url);
       const data = await res.json();
       if (data.ok && Array.isArray(data.records)) {
+        const wasAtBottom = firstLoad || (log.scrollHeight - log.scrollTop - log.clientHeight < 80);
+        const wasFirst = firstLoad;
         if (firstLoad) {
           log.innerHTML = '';
           firstLoad = false;
@@ -202,43 +498,127 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
         for (const r of data.records) {
           renderRecord(r);
           if (r.ts && (!lastTs || r.ts > lastTs)) lastTs = r.ts;
+          // 新的小十消息(非首次加载)→ 后台时弹系统通知
+          if (!wasFirst && r.role === 'assistant' && r.text) notify(r.text);
         }
-        log.scrollTop = log.scrollHeight;
-        meta.textContent = '在线 · ' + (lastTs ? fmtTime(lastTs) : '--');
-        dot.style.background = '#5cff7e';
+        if (wasAtBottom) log.scrollTop = log.scrollHeight;
+        meta.textContent = lastTs ? fmtTime(lastTs) : '在线';
+        dot.style.background = 'var(--green)';
       }
     } catch (e) {
-      meta.textContent = '断线 重试中';
-      dot.style.background = '#ff5c5c';
+      meta.textContent = '断线 · 重试中';
+      dot.style.background = 'var(--red)';
     }
+  }
+
+  async function pollTerm() {
+    if (currentTab !== 'term' || !AUTH_TOKEN) return;
+    try {
+      const res = await authFetch('/tmux/capture?session=cc&lines=60');
+      const data = await res.json();
+      if (data.ok) {
+        termEl.textContent = (data.pane || data.text || data.content || '').replace(/\[[0-9;]*m/g, '');
+        termEl.parentElement.scrollTop = termEl.parentElement.scrollHeight;
+      }
+    } catch (e) {}
+  }
+
+  // 待发附件状态
+  let pendingFile = null;
+  const pendingEl = document.getElementById('pending');
+  function showPending(f) {
+    pendingFile = f;
+    const isImg = f.type && f.type.startsWith('image/');
+    pendingEl.innerHTML = '';
+    if (isImg) {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(f);
+      pendingEl.appendChild(img);
+    } else {
+      const ic = document.createElement('span');
+      ic.className = 'pfileicon'; ic.textContent = '📎';
+      pendingEl.appendChild(ic);
+    }
+    const nm = document.createElement('span');
+    nm.className = 'pname'; nm.textContent = f.name;
+    pendingEl.appendChild(nm);
+    const x = document.createElement('button');
+    x.className = 'pcancel'; x.textContent = '×';
+    x.onclick = clearPending;
+    pendingEl.appendChild(x);
+    pendingEl.style.display = 'flex';
+  }
+  function clearPending() {
+    pendingFile = null;
+    pendingEl.style.display = 'none';
+    pendingEl.innerHTML = '';
   }
 
   async function send() {
     const text = input.value.trim();
+    if (!AUTH_TOKEN) return;
+    // 有待发附件:先传附件(带 caption),再清空
+    if (pendingFile) {
+      sendBtn.disabled = true; sendBtn.textContent = '·';
+      try {
+        const url = '/chat/upload?filename=' + encodeURIComponent(pendingFile.name) +
+                    (text ? '&text=' + encodeURIComponent(text) : '');
+        const res = await authFetch(url, { method: 'POST', body: pendingFile });
+        if (res.ok) {
+          input.value = ''; input.style.height = 'auto';
+          clearPending();
+          await poll();
+        } else { alert('上传失败 ' + res.status); }
+      } catch (e) { alert('网络出错 ' + e.message); }
+      finally { sendBtn.disabled = false; sendBtn.textContent = '↑'; }
+      return;
+    }
+    // 纯文字
     if (!text) return;
     sendBtn.disabled = true;
-    try {
-      const res = await fetch('/chat/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
-      });
-      if (res.ok) {
-        input.value = '';
-        await poll();
-      } else {
-        alert('发送失败 ' + res.status);
+    sendBtn.textContent = '·';
+    let lastErr = '';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await authFetch('/chat/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text })
+        });
+        if (res.ok) {
+          input.value = '';
+          input.style.height = 'auto';
+          sendBtn.disabled = false;
+          sendBtn.textContent = '↑';
+          await poll();
+          return;
+        }
+        lastErr = '服务器 ' + res.status;
+        if (res.status < 500) break;  // 4xx 不重试
+      } catch (e) {
+        lastErr = e.message;
       }
-    } catch (e) {
-      alert('网络出错 ' + e.message);
-    } finally {
-      sendBtn.disabled = false;
-      input.focus();
+      if (attempt < 2) await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
     }
+    sendBtn.disabled = false;
+    sendBtn.textContent = '↑';
+    alert('发送失败(已重试):' + lastErr + '\n你的文字还在,可以再点发送');
   }
 
-  sendBtn.addEventListener('click', send);
-  input.addEventListener('keydown', e => {
+  // 附件:点 + → 选文件(图片或任意文件)→ 只预览,点发送才传
+  const plusBtn = document.getElementById('plus');
+  const fileIn = document.getElementById('fileIn');
+  if (plusBtn && fileIn) {
+    plusBtn.addEventListener('click', () => fileIn.click());
+    fileIn.addEventListener('change', () => {
+      const f = fileIn.files && fileIn.files[0];
+      if (f) showPending(f);
+      fileIn.value = '';
+    });
+  }
+
+  if (sendBtn) sendBtn.addEventListener('click', send);
+  if (input) input.addEventListener('keydown', e => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       send();
@@ -247,7 +627,7 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
 
   poll();
   setInterval(poll, 2000);
-  input.focus();
+  setInterval(pollTerm, 2000);
 </script>
 </body>
 </html>
@@ -524,6 +904,9 @@ class PushHandler(BaseHTTPRequestHandler):
         return self._require_auth()
 
     def _is_public_get(self) -> bool:
+        # /web/chat 自己用 ?token= 校验,需要绕过全局 header 鉴权
+        if self.path == "/web/chat" or self.path.startswith("/web/chat?"):
+            return True
         return self.path in {"/health", "/version"}
 
     def _check_ip_allowed(self) -> bool:
@@ -826,11 +1209,13 @@ class PushHandler(BaseHTTPRequestHandler):
             _qs = parse_qs(urlparse(self.path).query)
             _qt = _qs.get("token", [None])[0]
             if _qt and self.state.shared_secret and _qt == self.state.shared_secret:
+                # URL 带 token 进来 — 注入到 HTML 同时存 localStorage
                 self._serve_web_chat(auth_token=_qt)
-            elif not self.state.strict_auth or self._auth_matches():
-                self._serve_web_chat(auth_token=None)
             else:
-                self._send_json(401, {"error": "unauthorized — use /web/chat?token=YOUR_SECRET"})
+                # 没带或带错 token — 仍然返回 HTML 骨架,让前端用 localStorage 里上次存的
+                # token 来调 API。如果 localStorage 也是空的,fetch 会拿到 401,
+                # 页面会提示用户重新粘带 token 的 URL。HTML 本身无敏感数据,只是骨架。
+                self._serve_web_chat(auth_token=None)
             return
         if self.path == "/gomoku/state":
             self._handle_gomoku_state()
@@ -2816,18 +3201,21 @@ class PushHandler(BaseHTTPRequestHandler):
     def _serve_web_chat(self, auth_token=None):
         html = WEB_CHAT_HTML
         if auth_token:
-            inject = f'  const AUTH_TOKEN = {json.dumps(auth_token)};\n  history.replaceState({{}}, \'\', \'/web/chat\');\n'
+            # 拿到 token 时存进 localStorage,以后刷新自动读,不再 401;同时把 token 从地址栏清掉
+            tok_lit = json.dumps(auth_token)
+            inject = (
+                f'  const AUTH_TOKEN = {tok_lit};\n'
+                f'  try {{ localStorage.setItem("ccc_auth", AUTH_TOKEN); }} catch(e){{}}\n'
+                f'  history.replaceState({{}}, \'\', \'/web/chat\');\n'
+            )
         else:
-            inject = '  const AUTH_TOKEN = \'\';\n'
+            # 没传 token 进来 — 试着从 localStorage 回读上次存的(刷新场景)
+            inject = (
+                '  let AUTH_TOKEN = "";\n'
+                '  try { AUTH_TOKEN = localStorage.getItem("ccc_auth") || ""; } catch(e){}\n'
+            )
+        # 前端用统一的 authFetch 自动挂 X-Auth-Token,只需要注入 AUTH_TOKEN 常量
         html = html.replace('<script>\n', '<script>\n' + inject, 1)
-        html = html.replace(
-            "const res = await fetch(url, { cache: 'no-store' });",
-            "const res = await fetch(url, { cache: 'no-store', headers: AUTH_TOKEN ? {'X-Auth-Token': AUTH_TOKEN} : {} });",
-        )
-        html = html.replace(
-            "headers: { 'Content-Type': 'application/json' },",
-            "headers: { 'Content-Type': 'application/json', ...(AUTH_TOKEN ? {'X-Auth-Token': AUTH_TOKEN} : {}) },",
-        )
         data = html.encode('utf-8')
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -3327,6 +3715,10 @@ class PushHandler(BaseHTTPRequestHandler):
             )
             if paste.returncode != 0:
                 return False, f"tmux paste-buffer failed: {paste.stderr.strip()}"
+            # 带图片占位符 [Image #N] 的消息: Claude Code 需要时间处理占位符,
+            # 立即 Enter 会被吞掉(消息卡在输入框).延迟一拍让 TUI 稳定.
+            import time as _t
+            _t.sleep(0.6)
             send = subprocess.run(
                 ["tmux", "send-keys", "-t", session, "Enter"],
                 capture_output=True, text=True, timeout=3,
@@ -3771,10 +4163,13 @@ class PushHandler(BaseHTTPRequestHandler):
             if isinstance(entry, tuple):
                 cache[dedupe_cache_key] = (entry[0], rec)
 
+        # silent=true 时跳过 APNs 推送 (分段消息的非末段, 避免连续多次震动)
+        is_silent = bool(body.get("silent"))
+
         # 5-7 主修 (per code review): Live Activity push 跟 standard notification 都搬到异步
         # 防 ACK 5-16s 阻塞 ios_reply 客户端 5s timeout
         # 这之前所有事必须做完 否则 ACK 后再读会拿不到 rec/text 之类局部
-        active_tokens_snapshot = self.state.tokens.all_active() if role == "assistant" else []
+        active_tokens_snapshot = self.state.tokens.all_active() if role == "assistant" and not is_silent else []
         snap_tasks = self.state.tasks.snapshot() if active_tokens_snapshot else None
         push_text_snap = text  # 闭包捕获
 
@@ -3812,8 +4207,8 @@ class PushHandler(BaseHTTPRequestHandler):
                             logger.warning("push spoke fail: %s", e)
                     apns_ms = int((time.time() - apns_t0) * 1000)
                     print(f"apns_live_ms={apns_ms} tokens={len(active_tokens_snapshot)}", file=sys.stderr, flush=True)
-                # standard remote notification banner (非灵动岛) — 跳过 [op] 前缀和非 assistant
-                if role == "assistant" and push_text_snap and not push_text_snap.startswith("[op]"):
+                # standard remote notification banner (非灵动岛) — 跳过 [op] 前缀和非 assistant 和 silent 段
+                if role == "assistant" and push_text_snap and not push_text_snap.startswith("[op]") and not is_silent:
                     notif_t0 = time.time()
                     self._send_chat_notification(self.state.device_tokens.default_ai_name(), push_text_snap[:80])
                     notif_ms = int((time.time() - notif_t0) * 1000)
