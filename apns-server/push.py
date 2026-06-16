@@ -303,6 +303,23 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
     border-top: 1px solid var(--border);
     text-align: center;
   }
+  .ctx-bar {
+    padding: 8px 14px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  .ctx-text { color: var(--text-2); margin-bottom: 5px; }
+  .ctx-text b { color: var(--text-1); font-weight: 600; }
+  .ctx-track { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .ctx-fill {
+    height: 100%; width: 0%;
+    background: var(--green);
+    transition: width .3s ease, background .3s ease;
+  }
+  .ctx-fill.warn { background: var(--amber); }
+  .ctx-fill.crit { background: var(--red); }
 
   /* token 缺失提示 */
   #token-form {
@@ -357,6 +374,10 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
 </div>
 
 <div class="panel" id="panel-term">
+  <div class="ctx-bar" id="ctx-bar" style="display:none;">
+    <div class="ctx-text">上下文进度: <b><span id="ctx-pct">--</span>%</b> · <span id="ctx-tok">--</span> / 1M tok<span id="ctx-hint"></span></div>
+    <div class="ctx-track"><div id="ctx-fill" class="ctx-fill"></div></div>
+  </div>
   <div id="term-wrap"><pre id="term">…</pre></div>
   <div class="term-note">只读视图 · 2 秒刷新一次 · 不可输入,只能看小十在做什么</div>
 </div>
@@ -438,7 +459,7 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
       currentTab = btn.dataset.tab;
       document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
       document.getElementById('panel-' + currentTab).classList.add('active');
-      if (currentTab === 'term') pollTerm();
+      if (currentTab === 'term') { pollTerm(); pollContext(); }
     });
   });
 
@@ -519,6 +540,39 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
       if (data.ok) {
         termEl.textContent = (data.pane || data.text || data.content || '').replace(/\[[0-9;]*m/g, '');
         termEl.parentElement.scrollTop = termEl.parentElement.scrollHeight;
+      }
+    } catch (e) {}
+  }
+
+  function fmtCtxTok(n) {
+    if (n >= 10000) {
+      const v = (n/10000).toFixed(1).replace(/\.0$/, '');
+      return v + '万';
+    }
+    return n.toLocaleString();
+  }
+  async function pollContext() {
+    if (currentTab !== 'term' || !AUTH_TOKEN) return;
+    try {
+      const res = await authFetch('/companion/context');
+      const d = await res.json();
+      if (!d || !d.ok) return;
+      const bar = document.getElementById('ctx-bar');
+      bar.style.display = 'block';
+      document.getElementById('ctx-pct').textContent = d.pct;
+      document.getElementById('ctx-tok').textContent = fmtCtxTok(d.est_tokens);
+      const fill = document.getElementById('ctx-fill');
+      fill.style.width = Math.min(100, d.pct) + '%';
+      fill.classList.remove('warn', 'crit');
+      const hint = document.getElementById('ctx-hint');
+      if (d.level === 'crit') {
+        fill.classList.add('crit');
+        hint.textContent = ' · 临近上限,该固化';
+      } else if (d.level === 'warn') {
+        fill.classList.add('warn');
+        hint.textContent = ' · 留意';
+      } else {
+        hint.textContent = '';
       }
     } catch (e) {}
   }
@@ -628,6 +682,7 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   poll();
   setInterval(poll, 2000);
   setInterval(pollTerm, 2000);
+  setInterval(pollContext, 30000);
 </script>
 </body>
 </html>
@@ -1120,6 +1175,9 @@ class PushHandler(BaseHTTPRequestHandler):
                 self._send_json(403, {"error": "remote_control disabled", "hint": "set allow_remote_control=true in config.toml"})
                 return
             self._handle_tmux_capture()
+            return
+        if self.path == "/companion/context":
+            self._handle_companion_context()
             return
         if self.path == "/tmux/sessions/order":
             if not self.state.allow_remote_control:
@@ -4832,6 +4890,43 @@ class PushHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "order": order})
         except Exception as e:
             self._send_json(500, {"error": str(e)})
+
+    def _handle_companion_context(self):
+        """估算小十当前 Claude Code session 的上下文用量。"""
+        try:
+            from pathlib import Path
+            proj = Path.home() / ".claude" / "projects" / "-Users-ryo-----ccc"
+            if not proj.exists():
+                self._send_json(200, {"ok": False, "error": "project dir not found"})
+                return
+            jsonls = sorted(proj.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if not jsonls:
+                self._send_json(200, {"ok": False, "error": "no session jsonl"})
+                return
+            latest = jsonls[0]
+            st = latest.stat()
+            chars = st.st_size
+            est_tokens = chars // 3
+            limit = 1_000_000
+            pct = min(100.0, est_tokens / limit * 100)
+            if pct < 60:
+                level = "ok"
+            elif pct < 80:
+                level = "warn"
+            else:
+                level = "crit"
+            self._send_json(200, {
+                "ok": True,
+                "session_id": latest.stem,
+                "modified": int(st.st_mtime),
+                "chars": chars,
+                "est_tokens": est_tokens,
+                "limit": limit,
+                "pct": round(pct, 1),
+                "level": level,
+            })
+        except Exception as e:
+            self._send_json(500, {"ok": False, "error": str(e)})
 
     def _handle_tmux_capture(self):
         from urllib.parse import urlparse, parse_qs
