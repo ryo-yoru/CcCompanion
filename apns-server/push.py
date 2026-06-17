@@ -4892,7 +4892,11 @@ class PushHandler(BaseHTTPRequestHandler):
             self._send_json(500, {"error": str(e)})
 
     def _handle_companion_context(self):
-        """估算小十当前 Claude Code session 的上下文用量。"""
+        """读小十当前 Claude Code session 最近一条 assistant message 的真 token 用量。
+
+        真 context = input_tokens + cache_creation_input_tokens + cache_read_input_tokens
+        这样 /compact 后会立刻降下来,不像 jsonl 文件 size 永远只涨。
+        """
         try:
             from pathlib import Path
             proj = Path.home() / ".claude" / "projects" / "-Users-ryo-----ccc"
@@ -4904,9 +4908,37 @@ class PushHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": False, "error": "no session jsonl"})
                 return
             latest = jsonls[0]
-            st = latest.stat()
-            chars = st.st_size
-            est_tokens = chars // 3
+            # 读全文(4-5MB,几十 ms),倒着扫最后 500 行找最近一条 assistant usage
+            try:
+                with open(latest, 'rb') as f:
+                    raw = f.read().decode('utf-8', errors='replace')
+                lines = raw.splitlines()
+            except Exception:
+                lines = []
+            est_tokens = None
+            last_ts = None
+            for line in reversed(lines[-500:]):
+                try:
+                    d = json.loads(line)
+                    if d.get('type') != 'assistant':
+                        continue
+                    msg = d.get('message')
+                    if not isinstance(msg, dict):
+                        continue
+                    u = msg.get('usage')
+                    if not isinstance(u, dict):
+                        continue
+                    est_tokens = (
+                        (u.get('input_tokens') or 0)
+                        + (u.get('cache_creation_input_tokens') or 0)
+                        + (u.get('cache_read_input_tokens') or 0)
+                    )
+                    last_ts = d.get('timestamp')
+                    break
+                except Exception:
+                    continue
+            if est_tokens is None:
+                est_tokens = 0
             limit = 1_000_000
             pct = min(100.0, est_tokens / limit * 100)
             if pct < 60:
@@ -4918,12 +4950,12 @@ class PushHandler(BaseHTTPRequestHandler):
             self._send_json(200, {
                 "ok": True,
                 "session_id": latest.stem,
-                "modified": int(st.st_mtime),
-                "chars": chars,
+                "modified": int(latest.stat().st_mtime),
                 "est_tokens": est_tokens,
                 "limit": limit,
                 "pct": round(pct, 1),
                 "level": level,
+                "ts": last_ts,
             })
         except Exception as e:
             self._send_json(500, {"ok": False, "error": str(e)})
