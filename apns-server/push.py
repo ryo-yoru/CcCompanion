@@ -853,6 +853,16 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   setInterval(pollTerm, 2000);
   setInterval(pollContext, 10000);  // 10s 一次,跟得上切伴侣/聊天后的变化
   pollContext();  // 进入页面立即跑一次,不等 10s
+
+  // presence heartbeat:页面 visible 时每 5s ping server,hook 推 Bark 前 query
+  // → 你在网页时 Bark 静音(不吵),离开 (锁屏/切别 app/关 tab) 10s+ 自动恢复推送
+  function presencePing() {
+    if (document.visibilityState !== 'visible' || !AUTH_TOKEN) return;
+    authFetch('/presence/ping', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' }).catch(()=>{});
+  }
+  setInterval(presencePing, 5000);
+  presencePing();  // 进入立即 ping 一次
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') presencePing(); });
 </script>
 </body>
 </html>
@@ -969,6 +979,8 @@ class ServerState:
         self.pet_activity_bus = PetActivityBus()
         # typing indicator 状态 (内存 不持久化)
         self.typing_state: dict[str, Any] = {"is_typing": False, "since": None}
+        # presence 心跳:网页 chat visible+focused 时每 5s ping,hook 推 Bark 前 check 是否 active 静音
+        self.last_presence_ping: float = 0.0
         # 书房 v1 (2026-05-09) — vault-aware project dashboard. read-only db (indexer 写)
         studyroom_db_path = HERE / "state" / "studyroom.db"
         self.studyroom = StudyroomDB(studyroom_db_path)
@@ -1352,6 +1364,9 @@ class PushHandler(BaseHTTPRequestHandler):
         if self.path == "/companions":
             self._handle_companions_list()
             return
+        if self.path == "/presence":
+            self._handle_presence_get()
+            return
         if self.path == "/tmux/sessions/order":
             if not self.state.allow_remote_control:
                 self._send_json(403, {"error": "remote_control disabled"})
@@ -1652,6 +1667,8 @@ class PushHandler(BaseHTTPRequestHandler):
             self._handle_group_members_delete(body)
         elif self.path == "/companions/rename":
             self._handle_companions_rename(body)
+        elif self.path == "/presence/ping":
+            self._handle_presence_ping()
         elif self.path == "/calendar/add":
             self._handle_calendar_add(body)
         elif self.path == "/calendar/update":
@@ -5209,6 +5226,24 @@ class PushHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "companions": comps})
         except Exception as e:
             self._send_json(500, {"ok": False, "error": str(e)})
+
+    def _handle_presence_ping(self):
+        """前端可见时每 5s 调一次,server 记 last_presence_ping。Hook 推 Bark 前 query。"""
+        if not self._check_auth():
+            self._send_json(401, {"error": "auth"})
+            return
+        import time as _t
+        self.state.last_presence_ping = _t.time()
+        self._send_json(200, {"ok": True})
+
+    def _handle_presence_get(self):
+        """Hook 调:返回离最近一次 presence ping 多久(秒)。<10s = 用户在网页活跃 = Bark 静音。"""
+        if not self._check_auth():
+            self._send_json(401, {"error": "auth"})
+            return
+        import time as _t
+        ago = _t.time() - (getattr(self.state, "last_presence_ping", 0) or 0)
+        self._send_json(200, {"ok": True, "last_ping_seconds_ago": int(ago)})
 
     def _handle_companions_rename(self, body: dict):
         """POST /companions/rename {session: "cc", display_name: "新名"}"""
