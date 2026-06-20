@@ -398,10 +398,6 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   <button class="icon-btn" id="themeBtn" aria-label="切换深浅" title="切换深浅">◐</button>
 </header>
 <div class="cbar" id="cbar"></div>
-<div class="ctx-bar" id="ctx-bar" style="display:none;">
-  <div class="ctx-text">上下文进度: <b><span id="ctx-pct">--</span>%</b> · <span id="ctx-tok">--</span> / 1M tok<span id="ctx-hint"></span></div>
-  <div class="ctx-track"><div id="ctx-fill" class="ctx-fill"></div></div>
-</div>
 <div class="tabs">
   <button class="tab active" data-tab="chat">对话</button>
   <button class="tab" data-tab="term">现场</button>
@@ -412,13 +408,17 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   <div id="pending" style="display:none;"></div>
   <footer>
     <button class="plus" id="plus" aria-label="附件">+</button>
-    <input type="file" id="fileIn" style="display:none">
+    <input type="file" id="fileIn" multiple style="display:none">
     <textarea id="input" placeholder="说点什么" rows="1"></textarea>
     <button class="send" id="send" aria-label="发送">↑</button>
   </footer>
 </div>
 
 <div class="panel" id="panel-term">
+  <div class="ctx-bar" id="ctx-bar" style="display:none;">
+    <div class="ctx-text">上下文进度: <b><span id="ctx-pct">--</span>%</b> · <span id="ctx-tok">--</span> / 1M tok<span id="ctx-hint"></span></div>
+    <div class="ctx-track"><div id="ctx-fill" class="ctx-fill"></div></div>
+  </div>
   <div id="term-wrap"><pre id="term">…</pre></div>
   <div class="term-note">只读视图 · 2 秒刷新一次 · 不可输入,只能看小十在做什么</div>
 </div>
@@ -703,7 +703,7 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
     return n.toLocaleString();
   }
   async function pollContext() {
-    if (!AUTH_TOKEN) return;  // 进度条挪到顶部全局,不限 tab
+    if (currentTab !== 'term' || !AUTH_TOKEN) return;  // 进度条只在 term tab 显示,省请求
     try {
       const sess = encodeURIComponent(currentCompanion || 'cc');
       const res = await authFetch('/companion/context?session=' + sess);
@@ -729,54 +729,72 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
     } catch (e) {}
   }
 
-  // 待发附件状态
-  let pendingFile = null;
+  // 待发附件状态(多图支持:pendingFiles 是 array)
+  let pendingFiles = [];
   const pendingEl = document.getElementById('pending');
-  function showPending(f) {
-    pendingFile = f;
-    const isImg = f.type && f.type.startsWith('image/');
+  function showPending(files) {
+    // files 可以是单个 File 或 FileList/Array — 全加入 pendingFiles 累积
+    const arr = files instanceof FileList ? Array.from(files) : (Array.isArray(files) ? files : [files]);
+    pendingFiles = pendingFiles.concat(arr);
+    renderPending();
+  }
+  function renderPending() {
     pendingEl.innerHTML = '';
-    if (isImg) {
-      const img = document.createElement('img');
-      img.src = URL.createObjectURL(f);
-      pendingEl.appendChild(img);
-    } else {
-      const ic = document.createElement('span');
-      ic.className = 'pfileicon'; ic.textContent = '📎';
-      pendingEl.appendChild(ic);
-    }
-    const nm = document.createElement('span');
-    nm.className = 'pname'; nm.textContent = f.name;
-    pendingEl.appendChild(nm);
-    const x = document.createElement('button');
-    x.className = 'pcancel'; x.textContent = '×';
-    x.onclick = clearPending;
-    pendingEl.appendChild(x);
+    if (!pendingFiles.length) { pendingEl.style.display = 'none'; return; }
+    pendingFiles.forEach((f, idx) => {
+      const item = document.createElement('span');
+      item.className = 'pitem';
+      item.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-right:8px;';
+      const isImg = f.type && f.type.startsWith('image/');
+      if (isImg) {
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(f);
+        item.appendChild(img);
+      } else {
+        const ic = document.createElement('span');
+        ic.className = 'pfileicon'; ic.textContent = '📎';
+        item.appendChild(ic);
+      }
+      const x = document.createElement('button');
+      x.className = 'pcancel'; x.textContent = '×';
+      x.onclick = () => { pendingFiles.splice(idx, 1); renderPending(); };
+      item.appendChild(x);
+      pendingEl.appendChild(item);
+    });
     pendingEl.style.display = 'flex';
   }
   function clearPending() {
-    pendingFile = null;
-    pendingEl.style.display = 'none';
-    pendingEl.innerHTML = '';
+    pendingFiles = [];
+    renderPending();
   }
 
   async function send() {
     const text = input.value.trim();
     if (!AUTH_TOKEN) return;
-    // 有待发附件:先传附件(带 caption),再清空
-    if (pendingFile) {
+    // 有待发附件:循环上传 N 张(只最后一张带 text caption,前 N-1 张不带)
+    if (pendingFiles.length) {
       sendBtn.disabled = true; sendBtn.textContent = '·';
-      try {
-        const url = '/chat/upload?filename=' + encodeURIComponent(pendingFile.name) +
-                    (text ? '&text=' + encodeURIComponent(text) : '');
-        const res = await authFetch(url, { method: 'POST', body: pendingFile });
-        if (res.ok) {
-          input.value = ''; input.style.height = 'auto';
-          clearPending();
-          await poll();
-        } else { alert('上传失败 ' + res.status); }
-      } catch (e) { alert('网络出错 ' + e.message); }
-      finally { sendBtn.disabled = false; sendBtn.textContent = '↑'; }
+      const total = pendingFiles.length;
+      let failed = [];
+      for (let i = 0; i < total; i++) {
+        const f = pendingFiles[i];
+        const isLast = (i === total - 1);
+        sendBtn.textContent = `· ${i+1}/${total}`;
+        try {
+          const url = '/chat/upload?filename=' + encodeURIComponent(f.name) +
+                      (isLast && text ? '&text=' + encodeURIComponent(text) : '');
+          const res = await authFetch(url, { method: 'POST', body: f });
+          if (!res.ok) failed.push(f.name + ' (' + res.status + ')');
+        } catch (e) { failed.push(f.name + ' (' + e.message + ')'); }
+      }
+      if (failed.length) {
+        alert('部分上传失败:\n' + failed.join('\n'));
+      } else {
+        input.value = ''; input.style.height = 'auto';
+        clearPending();
+      }
+      await poll();
+      sendBtn.disabled = false; sendBtn.textContent = '↑';
       return;
     }
     // 纯文字
@@ -817,8 +835,7 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   if (plusBtn && fileIn) {
     plusBtn.addEventListener('click', () => fileIn.click());
     fileIn.addEventListener('change', () => {
-      const f = fileIn.files && fileIn.files[0];
-      if (f) showPending(f);
+      if (fileIn.files && fileIn.files.length) showPending(fileIn.files);
       fileIn.value = '';
     });
   }
