@@ -179,6 +179,28 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   }
   header .icon-btn:active { background: var(--card); }
 
+  /* 伴侣 tab bar (多 companion 切换 — 在 view tab 之上) */
+  .cbar {
+    display: flex; gap: 6px;
+    padding: 8px 10px 4px;
+    background: var(--top);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .cbar::-webkit-scrollbar { display: none; }
+  .ctab {
+    background: var(--card); border: 1px solid var(--border);
+    padding: 5px 12px;
+    color: var(--text-2); font-size: 13px;
+    cursor: pointer; border-radius: 14px;
+    white-space: nowrap;
+    transition: background .15s, color .15s;
+    user-select: none; -webkit-user-select: none;
+  }
+  .ctab.active { background: var(--amber); border-color: var(--amber); color: #fff; font-weight: 500; }
+  .ctab.add { color: var(--text-3); border-style: dashed; padding: 5px 11px; }
+  .ctab.add:hover { color: var(--amber); }
+
   /* tab 切换 */
   .tabs {
     display: flex; gap: 4px;
@@ -195,6 +217,24 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
     margin-bottom: -1px;
   }
   .tab.active { color: var(--amber); border-bottom-color: var(--amber); }
+
+  /* 思考链折叠 */
+  .think-toggle {
+    display: inline-block;
+    margin-top: 6px; padding: 2px 8px;
+    background: var(--top); color: var(--text-3);
+    border: 1px solid var(--border); border-radius: 10px;
+    font-size: 11px; cursor: pointer; user-select: none;
+  }
+  .think-toggle:hover { color: var(--amber); }
+  .think-body {
+    margin-top: 6px; padding: 10px 12px;
+    background: var(--top); color: var(--text-2);
+    border-left: 2px solid var(--border);
+    border-radius: 0 6px 6px 0;
+    font-size: 12px; line-height: 1.65;
+    white-space: pre-wrap; word-break: break-word;
+  }
 
   .panel { flex: 1; display: none; flex-direction: column; overflow: hidden; }
   .panel.active { display: flex; }
@@ -357,9 +397,10 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   <button class="icon-btn" id="notifyBtn" aria-label="开启通知" title="开启通知">🔔</button>
   <button class="icon-btn" id="themeBtn" aria-label="切换深浅" title="切换深浅">◐</button>
 </header>
+<div class="cbar" id="cbar"></div>
 <div class="tabs">
   <button class="tab active" data-tab="chat">对话</button>
-  <button class="tab" data-tab="term">小十现场</button>
+  <button class="tab" data-tab="term">现场</button>
 </div>
 
 <div class="panel active" id="panel-chat">
@@ -450,6 +491,92 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   let seenKeys = new Set();
   let firstLoad = true;
   let currentTab = 'chat';
+  // 多 companion 状态(读 /companions 后渲染顶部 cbar)
+  let currentCompanion = (function(){
+    try { return localStorage.getItem('ccc_companion') || 'cc'; } catch(e) { return 'cc'; }
+  })();
+  let companionsCache = [{ session: 'cc', display_name: '小十' }];
+
+  function renderCBar() {
+    const cbar = document.getElementById('cbar');
+    if (!cbar) return;
+    cbar.innerHTML = '';
+    companionsCache.forEach(c => {
+      const b = document.createElement('button');
+      b.className = 'ctab' + (c.session === currentCompanion ? ' active' : '');
+      b.textContent = c.display_name || c.name || c.session;
+      b.dataset.session = c.session;
+      b.addEventListener('click', () => setCurrentCompanion(c.session));
+      // 长按 / 双击 rename
+      let pressTimer = null;
+      b.addEventListener('pointerdown', () => {
+        pressTimer = setTimeout(() => { renameCompanion(c); }, 600);
+      });
+      const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+      b.addEventListener('pointerup', cancelPress);
+      b.addEventListener('pointerleave', cancelPress);
+      b.addEventListener('dblclick', (e) => { e.preventDefault(); renameCompanion(c); });
+      cbar.appendChild(b);
+    });
+    const plus = document.createElement('button');
+    plus.className = 'ctab add';
+    plus.textContent = '+';
+    plus.title = '新建伴侣 → 控制台';
+    plus.addEventListener('click', () => {
+      // 控制台只在局域网/本机 127.0.0.1 起,网页公网点了给提示
+      alert('新建伴侣请到控制台:http://127.0.0.1:8797\n(只有 Mac 本机能访问;在家用 Mac 浏览器打开)');
+    });
+    cbar.appendChild(plus);
+  }
+
+  async function loadCompanions() {
+    if (!AUTH_TOKEN) return;
+    try {
+      const res = await authFetch('/companions');
+      const d = await res.json();
+      if (d && d.ok && Array.isArray(d.companions) && d.companions.length) {
+        companionsCache = d.companions;
+        // 若当前 currentCompanion 不在列表里,fallback 第一个
+        if (!companionsCache.find(c => c.session === currentCompanion)) {
+          currentCompanion = companionsCache[0].session;
+          try { localStorage.setItem('ccc_companion', currentCompanion); } catch(e){}
+        }
+      }
+    } catch(e) {}
+    renderCBar();
+  }
+
+  function setCurrentCompanion(session) {
+    if (session === currentCompanion) return;
+    currentCompanion = session;
+    try { localStorage.setItem('ccc_companion', session); } catch(e){}
+    // 切换 = 清当前 chat 重新拉该 companion 的历史
+    lastTs = null;
+    seenKeys = new Set();
+    firstLoad = true;
+    log.innerHTML = '';
+    renderCBar();
+    poll();
+    if (currentTab === 'term') pollTerm();
+  }
+
+  async function renameCompanion(c) {
+    const newName = prompt('重命名「' + (c.display_name || c.name || c.session) + '」', c.display_name || c.name || '');
+    if (!newName || newName.trim() === '') return;
+    try {
+      const res = await authFetch('/companions/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: c.session, display_name: newName.trim() })
+      });
+      const d = await res.json();
+      if (d && d.ok) {
+        await loadCompanions();
+      } else {
+        alert('改名失败: ' + (d && d.error || 'unknown'));
+      }
+    } catch(e) { alert('网络出错 ' + e.message); }
+  }
 
   // tab 切换
   document.querySelectorAll('.tab').forEach(btn => {
@@ -462,6 +589,9 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
       if (currentTab === 'term') { pollTerm(); pollContext(); }
     });
   });
+
+  // 启动时拉一次伴侣列表
+  loadCompanions();
 
   function fmtTime(ts) {
     if (!ts) return '';
@@ -485,6 +615,22 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
     ts.className = 'ts';
     ts.textContent = fmtTime(r.ts);
     row.appendChild(bubble); row.appendChild(ts);
+    // 原始思考链(assistant 才有,hook 已经从 transcript 抓 type=thinking 字段)
+    if (r.role === 'assistant' && r.thinking && r.thinking.trim()) {
+      const toggle = document.createElement('div');
+      toggle.className = 'think-toggle';
+      toggle.textContent = '💭 看思考';
+      const body = document.createElement('div');
+      body.className = 'think-body';
+      body.style.display = 'none';
+      body.textContent = r.thinking;
+      toggle.addEventListener('click', () => {
+        const open = body.style.display !== 'none';
+        body.style.display = open ? 'none' : 'block';
+        toggle.textContent = open ? '💭 看思考' : '💭 收起';
+      });
+      row.appendChild(toggle); row.appendChild(body);
+    }
     log.appendChild(row);
   }
 
@@ -506,7 +652,10 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   async function poll() {
     if (!AUTH_TOKEN) return;
     try {
-      const url = lastTs ? '/chat/history?since=' + encodeURIComponent(lastTs) : '/chat/history?limit=200';
+      const c = encodeURIComponent(currentCompanion || 'cc');
+      const url = lastTs
+        ? '/chat/history?since=' + encodeURIComponent(lastTs) + '&companion=' + c
+        : '/chat/history?limit=200&companion=' + c;
       const res = await authFetch(url);
       const data = await res.json();
       if (data.ok && Array.isArray(data.records)) {
@@ -535,7 +684,8 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   async function pollTerm() {
     if (currentTab !== 'term' || !AUTH_TOKEN) return;
     try {
-      const res = await authFetch('/tmux/capture?session=cc&lines=60');
+      const sess = encodeURIComponent(currentCompanion || 'cc');
+      const res = await authFetch('/tmux/capture?session=' + sess + '&lines=60');
       const data = await res.json();
       if (data.ok) {
         termEl.textContent = (data.pane || data.text || data.content || '').replace(/\[[0-9;]*m/g, '');
@@ -554,7 +704,8 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   async function pollContext() {
     if (currentTab !== 'term' || !AUTH_TOKEN) return;
     try {
-      const res = await authFetch('/companion/context');
+      const sess = encodeURIComponent(currentCompanion || 'cc');
+      const res = await authFetch('/companion/context?session=' + sess);
       const d = await res.json();
       if (!d || !d.ok) return;
       const bar = document.getElementById('ctx-bar');
@@ -637,7 +788,7 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
         const res = await authFetch('/chat/send', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text })
+          body: JSON.stringify({ text, companion: currentCompanion || 'cc' })
         });
         if (res.ok) {
           input.value = '';
@@ -1176,8 +1327,11 @@ class PushHandler(BaseHTTPRequestHandler):
                 return
             self._handle_tmux_capture()
             return
-        if self.path == "/companion/context":
+        if self.path == "/companion/context" or self.path.startswith("/companion/context?"):
             self._handle_companion_context()
+            return
+        if self.path == "/companions":
+            self._handle_companions_list()
             return
         if self.path == "/tmux/sessions/order":
             if not self.state.allow_remote_control:
@@ -1477,6 +1631,8 @@ class PushHandler(BaseHTTPRequestHandler):
             self._handle_group_members_add(body)
         elif self.path == "/group/members/delete":
             self._handle_group_members_delete(body)
+        elif self.path == "/companions/rename":
+            self._handle_companions_rename(body)
         elif self.path == "/calendar/add":
             self._handle_calendar_add(body)
         elif self.path == "/calendar/update":
@@ -3296,13 +3452,16 @@ class PushHandler(BaseHTTPRequestHandler):
             n_around = int(qs.get("n", ["25"])[0])
         except Exception:
             n_around = 25
+        companion_filter = qs.get("companion", [None])[0]  # multi-companion: 按 tmux session name 过滤
         # iOS 本地 SwiftData 首次同步需要全量；UI 自己只渲染最近窗口。
         limit = min(max(limit, 1), 10000)
         n_around = min(max(n_around, 1), 200)
         if around_ts:
             chat_records = self.state.chat.read_around(ts=around_ts, n=n_around)
+            if companion_filter:
+                chat_records = [r for r in chat_records if (r.get("companion") or "cc") == companion_filter]
         else:
-            chat_records = self.state.chat.read_since(since_ts=since, before_ts=before, limit=limit)
+            chat_records = self.state.chat.read_since(since_ts=since, before_ts=before, limit=limit, companion=companion_filter)
         # task records 走 /chat/poll 不混入持久 history (prevents stale task injection causing scroll-jump)
         records = chat_records
         self._send_json(200, {"ok": True, "records": records, "count": len(records)})
@@ -3653,10 +3812,12 @@ class PushHandler(BaseHTTPRequestHandler):
             self._send_json(500, {"ok": False, "error": str(e)})
 
     def _handle_chat_send(self, body: dict[str, Any]):
-        """iPhone 发消息进来 → 写 user 条 + 调 bus_send.py 注入主 session"""
+        """iPhone 发消息进来 → 写 user 条 + 调 bus_send.py 注入主 session
+        multi-companion: body.companion 指定 tmux session;不传则用 active_session(向后兼容)"""
         text = body.get("text", "").strip()
         quoted_ts = body.get("quoted_ts") or None
         location = body.get("location") or None
+        companion = (body.get("companion") or "").strip() or None  # tmux session name
         if not text and not location:
             self._send_json(400, {"error": "text or location required"})
             return
@@ -3667,6 +3828,7 @@ class PushHandler(BaseHTTPRequestHandler):
             source="ios-app",
             quoted_ts=quoted_ts,
             location=location,
+            companion=companion,
         )
         # 包 quote 进注入文本 (主 session 收到 channel tag 内含 quote 上下文 + 时间戳跟 wechat 一致)
         from datetime import datetime as _dt
@@ -3695,7 +3857,8 @@ class PushHandler(BaseHTTPRequestHandler):
         # 2026-05-14 build 200 — 不依赖 ~/scripts/bus_send.py (Opia 内部 file, ccc 公开版用户没有)
         # 如果 bus_send.py 存在 用它走 bus dispatcher 路由 (Opia 内部多 agent 协调用)
         # 不存在 fallback 直接 tmux paste-buffer + send-keys 注入 (ccc 公开版默认走这条)
-        target_session = (self.state.active_session or self.state.default_session).strip()
+        # multi-companion: body.companion 优先(网页 tab 切换时带),否则用 active_session(向后兼容)
+        target_session = (companion or self.state.active_session or self.state.default_session).strip()
         ok, err = self._inject_to_session(target_session, injected, source="ios-app", sender="iphone")
         if not ok:
             # 注入失败 (target session 不存在 / tmux 没装 / bus_send crash 等). 用 502 surface
@@ -4166,12 +4329,14 @@ class PushHandler(BaseHTTPRequestHandler):
         rec = self.state.chat.append(
             role=role,
             text=text,
-            source="ios-app",
+            source=body.get("source") or "ios-app",
             attachment_url=attachment_url,
             attachment_type=attachment_type,
             attachment_filename=attachment_filename,
             metadata=metadata,
             turn_id=reply_turn_id,
+            companion=(body.get("companion") or None),  # hook 带 COMPANION_NAME's session
+            thinking=(body.get("thinking") or None),    # 原始思考链
         )
 
         # move 成功 append 后缓存 client_msg_id (LRU 100)
@@ -4892,16 +5057,35 @@ class PushHandler(BaseHTTPRequestHandler):
             self._send_json(500, {"error": str(e)})
 
     def _handle_companion_context(self):
-        """读小十当前 Claude Code session 最近一条 assistant message 的真 token 用量。
+        """读指定伴侣最近一条 assistant message 的真 token 用量。
 
         真 context = input_tokens + cache_creation_input_tokens + cache_read_input_tokens
         这样 /compact 后会立刻降下来,不像 jsonl 文件 size 永远只涨。
+
+        multi-companion: 通过 qs ?session= 选哪个伴侣;默认 cc(小十)。
+        从 companions.json 找该 session 的 home dir → 转 Claude Code project key 。
         """
         try:
+            import re
             from pathlib import Path
-            proj = Path.home() / ".claude" / "projects" / "-Users-ryo-----ccc"
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            session = (qs.get("session", ["cc"])[0] or "cc").strip()
+            # 找 home dir
+            comps = self._load_companions()
+            home = None
+            for c in comps:
+                if c.get("session") == session:
+                    home = c.get("home") or ""
+                    break
+            if not home:
+                # 推断默认:~/我们家/<session>(add-companion 约定);小十 home 在 companions.json 里
+                home = str(Path.home() / "我们家" / session)
+            # Claude Code project key:非 alnum 字符全转 -
+            proj_key = re.sub(r'[^A-Za-z0-9]', '-', home)
+            proj = Path.home() / ".claude" / "projects" / proj_key
             if not proj.exists():
-                self._send_json(200, {"ok": False, "error": "project dir not found"})
+                self._send_json(200, {"ok": False, "error": f"project dir not found: {proj_key}", "session": session})
                 return
             jsonls = sorted(proj.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
             if not jsonls:
@@ -4957,6 +5141,83 @@ class PushHandler(BaseHTTPRequestHandler):
                 "level": level,
                 "ts": last_ts,
             })
+        except Exception as e:
+            self._send_json(500, {"ok": False, "error": str(e)})
+
+    # --- multi-companion: 读 /Users/ryo/我们家/companions.json + rename display_name ---
+    _COMPANIONS_PATH = "/Users/ryo/我们家/companions.json"
+
+    def _load_companions(self) -> list[dict]:
+        """读 companions.json,返回 [{session, display_name, name, home, ...}, ...]。
+        兼容旧记录:没有 display_name 时 fallback 到 name。"""
+        import json as _json
+        from pathlib import Path as _Path
+        try:
+            raw = _Path(self._COMPANIONS_PATH).read_text(encoding="utf-8")
+            data = _json.loads(raw)
+            items = data.get("companions", []) if isinstance(data, dict) else []
+            out = []
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                session = (it.get("session") or "").strip()
+                if not session:
+                    continue
+                out.append({
+                    "session": session,
+                    "display_name": (it.get("display_name") or it.get("name") or session).strip(),
+                    "name": it.get("name") or session,
+                    "home": it.get("home") or "",
+                    "born": it.get("born") or "",
+                    "note": it.get("note") or "",
+                })
+            return out
+        except Exception as e:
+            # 至少回小十一条让前端不空
+            return [{"session": "cc", "display_name": "小十", "name": "小十", "home": "", "born": "", "note": ""}]
+
+    def _save_companions(self, items: list[dict]) -> None:
+        import json as _json
+        from pathlib import Path as _Path
+        _Path(self._COMPANIONS_PATH).write_text(
+            _json.dumps({"companions": items}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def _handle_companions_list(self):
+        try:
+            comps = self._load_companions()
+            self._send_json(200, {"ok": True, "companions": comps})
+        except Exception as e:
+            self._send_json(500, {"ok": False, "error": str(e)})
+
+    def _handle_companions_rename(self, body: dict):
+        """POST /companions/rename {session: "cc", display_name: "新名"}"""
+        try:
+            session = (body.get("session") or "").strip()
+            new_name = (body.get("display_name") or "").strip()
+            if not session or not new_name:
+                self._send_json(400, {"ok": False, "error": "session + display_name required"})
+                return
+            import json as _json
+            from pathlib import Path as _Path
+            raw = _Path(self._COMPANIONS_PATH).read_text(encoding="utf-8")
+            data = _json.loads(raw)
+            items = data.get("companions", [])
+            found = False
+            for it in items:
+                if isinstance(it, dict) and it.get("session") == session:
+                    it["display_name"] = new_name[:30]  # cap
+                    found = True
+                    break
+            if not found:
+                self._send_json(404, {"ok": False, "error": f"session {session} not in companions.json"})
+                return
+            _Path(self._COMPANIONS_PATH).write_text(
+                _json.dumps({"companions": items}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            self._send_json(200, {"ok": True, "session": session, "display_name": new_name[:30]})
         except Exception as e:
             self._send_json(500, {"ok": False, "error": str(e)})
 

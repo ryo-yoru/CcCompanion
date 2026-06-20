@@ -81,16 +81,21 @@ class ChatHistory:
         location: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
         turn_id: str | None = None,
+        companion: str | None = None,
+        thinking: str | None = None,
     ) -> dict[str, Any]:
         rec: dict[str, Any] = {
             "ts": datetime.now(timezone.utc).astimezone().isoformat(timespec="milliseconds"),
             "role": role,
             "text": text,
             "source": source,
+            "companion": (companion or "cc").strip() or "cc",  # tmux session name; old records default "cc" (小十)
             "audio_zh": None,
             "audio_en": None,
             "audio_ja": None,
         }
+        if thinking:
+            rec["thinking"] = thinking
         if turn_id:
             rec["turn_id"] = turn_id
         if quoted_ts:
@@ -200,9 +205,10 @@ class ChatHistory:
                     return rec.get("text", "")
         return None
 
-    def read_since(self, since_ts: str | None = None, before_ts: str | None = None, limit: int = 10000, include_hidden: bool = False) -> list[dict[str, Any]]:
+    def read_since(self, since_ts: str | None = None, before_ts: str | None = None, limit: int = 10000, include_hidden: bool = False, companion: str | None = None) -> list[dict[str, Any]]:
         """since_ts 之后 + before_ts 之前 (二者皆 optional).
-        include_hidden=False (默认) 过滤掉 hidden_in_ui=True 的 record (重新发言覆盖那条)."""
+        include_hidden=False (默认) 过滤掉 hidden_in_ui=True 的 record (重新发言覆盖那条).
+        companion 指定时仅返回该 companion (= tmux session name) 的 record;旧 record 无字段时按 "cc" 算 (小十)."""
         if not self.path.exists():
             return []
         out: list[dict[str, Any]] = []
@@ -223,6 +229,10 @@ class ChatHistory:
                         continue
                     if not include_hidden and rec.get("hidden_in_ui"):
                         continue
+                    if companion is not None:
+                        rec_comp = rec.get("companion") or "cc"
+                        if rec_comp != companion:
+                            continue
                     out.append(rec)
         # before_ts 模式 (向上翻页) 取最末 N 条 = 最靠近 before_ts 的旧消息
         # 默认模式 (since_ts 之后或全量) 取最末 N 条 = 最新
