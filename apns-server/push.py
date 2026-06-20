@@ -398,6 +398,10 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   <button class="icon-btn" id="themeBtn" aria-label="切换深浅" title="切换深浅">◐</button>
 </header>
 <div class="cbar" id="cbar"></div>
+<div class="ctx-bar" id="ctx-bar" style="display:none;">
+  <div class="ctx-text">上下文进度: <b><span id="ctx-pct">--</span>%</b> · <span id="ctx-tok">--</span> / 1M tok<span id="ctx-hint"></span></div>
+  <div class="ctx-track"><div id="ctx-fill" class="ctx-fill"></div></div>
+</div>
 <div class="tabs">
   <button class="tab active" data-tab="chat">对话</button>
   <button class="tab" data-tab="term">现场</button>
@@ -415,10 +419,6 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
 </div>
 
 <div class="panel" id="panel-term">
-  <div class="ctx-bar" id="ctx-bar" style="display:none;">
-    <div class="ctx-text">上下文进度: <b><span id="ctx-pct">--</span>%</b> · <span id="ctx-tok">--</span> / 1M tok<span id="ctx-hint"></span></div>
-    <div class="ctx-track"><div id="ctx-fill" class="ctx-fill"></div></div>
-  </div>
   <div id="term-wrap"><pre id="term">…</pre></div>
   <div class="term-note">只读视图 · 2 秒刷新一次 · 不可输入,只能看小十在做什么</div>
 </div>
@@ -558,6 +558,7 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
     renderCBar();
     poll();
     if (currentTab === 'term') pollTerm();
+    pollContext();  // 切伴侣立即刷新进度条
   }
 
   async function renameCompanion(c) {
@@ -608,14 +609,7 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
     seenKeys.add(key);
     const row = document.createElement('div');
     row.className = 'row ' + (r.role === 'user' ? 'user' : 'assistant');
-    const bubble = document.createElement('div');
-    bubble.className = 'bubble';
-    bubble.textContent = r.text || '';
-    const ts = document.createElement('div');
-    ts.className = 'ts';
-    ts.textContent = fmtTime(r.ts);
-    row.appendChild(bubble); row.appendChild(ts);
-    // 原始思考链(assistant 才有,hook 已经从 transcript 抓 type=thinking 字段)
+    // 原始思考链 优先挂在顶部(思考过程在前,回复气泡在后 — 符合"想完才说")
     if (r.role === 'assistant' && r.thinking && r.thinking.trim()) {
       const toggle = document.createElement('div');
       toggle.className = 'think-toggle';
@@ -631,6 +625,13 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
       });
       row.appendChild(toggle); row.appendChild(body);
     }
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = r.text || '';
+    const ts = document.createElement('div');
+    ts.className = 'ts';
+    ts.textContent = fmtTime(r.ts);
+    row.appendChild(bubble); row.appendChild(ts);
     log.appendChild(row);
   }
 
@@ -702,7 +703,7 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
     return n.toLocaleString();
   }
   async function pollContext() {
-    if (currentTab !== 'term' || !AUTH_TOKEN) return;
+    if (!AUTH_TOKEN) return;  // 进度条挪到顶部全局,不限 tab
     try {
       const sess = encodeURIComponent(currentCompanion || 'cc');
       const res = await authFetch('/companion/context?session=' + sess);
@@ -833,7 +834,8 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   poll();
   setInterval(poll, 2000);
   setInterval(pollTerm, 2000);
-  setInterval(pollContext, 30000);
+  setInterval(pollContext, 10000);  // 10s 一次,跟得上切伴侣/聊天后的变化
+  pollContext();  // 进入页面立即跑一次,不等 10s
 </script>
 </body>
 </html>
