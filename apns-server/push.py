@@ -636,17 +636,13 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
     log.appendChild(row);
   }
 
-  // 输入框自动撑高 — 用"保持距底距离" 代替"强制拉到底":
-  // - 在底部 → 撑高后还在底部(自然)
-  // - 中间滑动看历史 → 撑高后视野不动(不再跳回最新)
+  // 输入框自动撑高 — 撑高会挤压消息区,若原本贴底就同步把消息拉回底部,避免"跳"
+  // (上一 CC 的版本,经实战验证电脑端不跳;之前我改 RAF "保持距底" 在桌面端造成双闪 → revert)
   if (input) input.addEventListener('input', () => {
-    const distFromBottom = log.scrollHeight - log.scrollTop - log.clientHeight;
+    const wasAtBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 140) + 'px';
-    // layout 改完后,把 scrollTop 调成保持原 distFromBottom
-    requestAnimationFrame(() => {
-      log.scrollTop = log.scrollHeight - log.clientHeight - distFromBottom;
-    });
+    if (wasAtBottom) log.scrollTop = log.scrollHeight;
   });
 
   function authFetch(url, opts) {
