@@ -1,0 +1,5 @@
+{
+  "_note": "把表情包图扔进 apns-server/stickers/ 目录,在下面 stickers 数组加条目就生效",
+  "_schema": "{id: 短英文键, file: 文件名, desc: 含义(小十看了知道什么场景用)}",
+  "stickers": []
+}

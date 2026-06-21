@@ -218,6 +218,25 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   }
   .tab.active { color: var(--amber); border-bottom-color: var(--amber); }
 
+  /* sticker panel */
+  .sticker-panel {
+    display: none;
+    position: absolute; bottom: 60px; left: 10px; right: 10px;
+    max-height: 240px; overflow-y: auto;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 10px; z-index: 50;
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.08);
+  }
+  .sticker-panel.show { display: block; }
+  .sticker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 8px; }
+  .sticker-item { cursor: pointer; border-radius: 8px; padding: 4px; transition: background .15s; text-align: center; }
+  .sticker-item:hover { background: var(--top); }
+  .sticker-item img { width: 100%; height: 60px; object-fit: contain; display: block; }
+  .sticker-item .desc { font-size: 9px; color: var(--text-3); margin-top: 2px; line-height: 1.2; }
+  .sticker-empty { color: var(--text-3); font-size: 12px; text-align: center; padding: 20px; }
+  /* chat 内 sticker 渲染 */
+  .row .bubble img.sticker { max-width: 100px; max-height: 100px; display: block; }
+
   /* 思考链折叠 */
   .think-toggle {
     display: inline-block;
@@ -409,10 +428,14 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   <div id="pending" style="display:none;"></div>
   <footer>
     <button class="plus" id="plus" aria-label="附件">+</button>
+    <button class="plus" id="stickerBtn" aria-label="表情包" style="font-size:18px;">😀</button>
     <input type="file" id="fileIn" multiple style="display:none">
     <textarea id="input" placeholder="说点什么" rows="1"></textarea>
     <button class="send" id="send" aria-label="发送">↑</button>
   </footer>
+  <div class="sticker-panel" id="stickerPanel">
+    <div id="stickerGrid" class="sticker-grid"></div>
+  </div>
 </div>
 
 <div class="panel" id="panel-term">
@@ -839,6 +862,60 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
     fileIn.addEventListener('change', () => {
       if (fileIn.files && fileIn.files.length) showPending(fileIn.files);
       fileIn.value = '';
+    });
+  }
+
+  // 表情包 sticker panel
+  const stickerBtn = document.getElementById('stickerBtn');
+  const stickerPanel = document.getElementById('stickerPanel');
+  const stickerGrid = document.getElementById('stickerGrid');
+  let stickersLoaded = false;
+  async function loadStickers() {
+    if (!AUTH_TOKEN) return;
+    try {
+      const res = await authFetch('/stickers');
+      const d = await res.json();
+      stickerGrid.innerHTML = '';
+      if (!d || !d.ok || !d.stickers || !d.stickers.length) {
+        stickerGrid.innerHTML = '<div class="sticker-empty">还没有表情包<br>把图扔进 apns-server/stickers/ + 在 stickers.json 加条目</div>';
+        return;
+      }
+      d.stickers.forEach(s => {
+        const item = document.createElement('div');
+        item.className = 'sticker-item';
+        item.title = s.desc || s.id;
+        item.innerHTML = `<img src="${s.url}" alt="${s.id}"><div class="desc">${s.desc || s.id}</div>`;
+        item.addEventListener('click', () => sendSticker(s.id));
+        stickerGrid.appendChild(item);
+      });
+    } catch(e) {}
+  }
+  async function sendSticker(sid) {
+    if (!AUTH_TOKEN) return;
+    stickerPanel.classList.remove('show');
+    try {
+      const res = await authFetch('/chat/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sticker_id: sid, companion: currentCompanion || 'cc' })
+      });
+      if (res.ok) await poll();
+      else alert('发送失败 ' + res.status);
+    } catch(e) { alert('网络出错 ' + e.message); }
+  }
+  if (stickerBtn) {
+    stickerBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const open = stickerPanel.classList.contains('show');
+      if (open) { stickerPanel.classList.remove('show'); return; }
+      if (!stickersLoaded) { await loadStickers(); stickersLoaded = true; }
+      stickerPanel.classList.add('show');
+    });
+    // 点 panel 外面收起
+    document.addEventListener('click', (e) => {
+      if (!stickerPanel.contains(e.target) && e.target !== stickerBtn) {
+        stickerPanel.classList.remove('show');
+      }
     });
   }
 
@@ -1368,6 +1445,12 @@ class PushHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/presence":
             self._handle_presence_get()
+            return
+        if self.path == "/stickers":
+            self._handle_stickers_list()
+            return
+        if self.path.startswith("/stickers/"):
+            self._handle_sticker_file()
             return
         if self.path == "/tmux/sessions/order":
             if not self.state.allow_remote_control:
@@ -3851,15 +3934,31 @@ class PushHandler(BaseHTTPRequestHandler):
 
     def _handle_chat_send(self, body: dict[str, Any]):
         """iPhone 发消息进来 → 写 user 条 + 调 bus_send.py 注入主 session
-        multi-companion: body.companion 指定 tmux session;不传则用 active_session(向后兼容)"""
+        multi-companion: body.companion 指定 tmux session;不传则用 active_session(向后兼容)
+        sticker: body.sticker_id 时把 sticker 当一种 attachment 落 record + inject hint"""
         text = body.get("text", "").strip()
         quoted_ts = body.get("quoted_ts") or None
         location = body.get("location") or None
         companion = (body.get("companion") or "").strip() or None  # tmux session name
-        if not text and not location:
-            self._send_json(400, {"error": "text or location required"})
+        sticker_id = (body.get("sticker_id") or "").strip() or None
+        # sticker 模式:验证 + 转 attachment 落 record
+        sticker_attachment_url = None
+        sticker_attachment_filename = None
+        sticker_desc = ""
+        if sticker_id:
+            for s in self._load_stickers():
+                if s["id"] == sticker_id:
+                    sticker_attachment_url = f"/stickers/{s['file']}"
+                    sticker_attachment_filename = s["file"]
+                    sticker_desc = s["desc"]
+                    break
+            if not sticker_attachment_url:
+                self._send_json(400, {"error": f"unknown sticker_id: {sticker_id}"})
+                return
+        if not text and not location and not sticker_id:
+            self._send_json(400, {"error": "text or location or sticker_id required"})
             return
-        # 写 user 历史
+        # 写 user 历史(sticker 当 image attachment 落,前端复用图片渲染)
         rec = self.state.chat.append(
             role="user",
             text=text,
@@ -3867,6 +3966,9 @@ class PushHandler(BaseHTTPRequestHandler):
             quoted_ts=quoted_ts,
             location=location,
             companion=companion,
+            attachment_url=sticker_attachment_url,
+            attachment_type="image" if sticker_attachment_url else None,
+            attachment_filename=sticker_attachment_filename,
         )
         # 包 quote 进注入文本 (主 session 收到 channel tag 内含 quote 上下文 + 时间戳跟 wechat 一致)
         from datetime import datetime as _dt
@@ -3889,6 +3991,10 @@ class PushHandler(BaseHTTPRequestHandler):
                 injected = f"{ts_prefix} {tts_hint}[引用 \"{rec['quoted_text']}\"]\n{loc_str}"
                 if text:
                     injected = f"{injected}\n{text}"
+        # sticker:加 hint 让小十知道她发了表情包(text 可能为空)
+        if sticker_id:
+            sticker_hint = f"[她发了表情包 :{sticker_id}: 含义={sticker_desc}]"
+            injected = f"{ts_prefix} {tts_hint}{sticker_hint}" + (f"\n{text}" if text else "")
         # set typing — Cc 收到 message 在 thinking
         self.state.typing_state = {"is_typing": True, "since": rec["ts"]}
         # 注入文本到 active tmux session
@@ -5228,6 +5334,58 @@ class PushHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "companions": comps})
         except Exception as e:
             self._send_json(500, {"ok": False, "error": str(e)})
+
+    # --- 表情包 stickers (2026-06-21) ---
+    _STICKERS_JSON = Path("/Users/ryo/CcCompanion/apns-server/stickers.json")
+    _STICKERS_DIR = Path("/Users/ryo/CcCompanion/apns-server/stickers")
+
+    def _load_stickers(self) -> list[dict]:
+        try:
+            data = json.loads(self._STICKERS_JSON.read_text(encoding="utf-8"))
+            out = []
+            for s in data.get("stickers", []):
+                if not isinstance(s, dict):
+                    continue
+                sid = (s.get("id") or "").strip()
+                fname = (s.get("file") or "").strip()
+                if not sid or not fname:
+                    continue
+                out.append({"id": sid, "file": fname, "desc": s.get("desc", "") or ""})
+            return out
+        except Exception:
+            return []
+
+    def _handle_stickers_list(self):
+        if not self._check_auth():
+            self._send_json(401, {"error": "auth"})
+            return
+        items = self._load_stickers()
+        out = [{"id": s["id"], "url": f"/stickers/{s['file']}", "desc": s["desc"]} for s in items]
+        self._send_json(200, {"ok": True, "stickers": out})
+
+    def _handle_sticker_file(self):
+        from urllib.parse import unquote
+        fname = self.path.split("/stickers/", 1)[1].split("?")[0]
+        fname = unquote(fname)
+        # 防 path traversal
+        if "/" in fname or ".." in fname or not fname:
+            self._send_json(400, {"error": "bad filename"})
+            return
+        fp = self._STICKERS_DIR / fname
+        if not fp.exists() or not fp.is_file():
+            self._send_json(404, {"error": "not found"})
+            return
+        ext = fp.suffix.lower()
+        mime_map = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                    ".gif": "image/gif", ".webp": "image/webp"}
+        mime = mime_map.get(ext, "application/octet-stream")
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.send_header("Content-Length", str(fp.stat().st_size))
+        self.end_headers()
+        with fp.open("rb") as f:
+            self.wfile.write(f.read())
 
     def _handle_presence_ping(self):
         """前端可见时每 5s 调一次,server 记 last_presence_ping。Hook 推 Bark 前 query。"""
