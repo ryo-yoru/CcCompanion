@@ -244,6 +244,7 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
     flex: 1; overflow-y: auto;
     padding: 20px 16px 12px;
     -webkit-overflow-scrolling: touch;
+    overflow-anchor: none;  /* 关浏览器自动 anchor — 防 layout shift 时跳 */
   }
   .row { margin: 14px 0; max-width: 88%; line-height: 1.7; }
   .row.user { margin-left: auto; }
@@ -635,12 +636,17 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
     log.appendChild(row);
   }
 
-  // 输入框自动撑高 — 撑高会挤压消息区,若原本贴底就把消息拉回底部,避免"跳"
+  // 输入框自动撑高 — 用"保持距底距离" 代替"强制拉到底":
+  // - 在底部 → 撑高后还在底部(自然)
+  // - 中间滑动看历史 → 撑高后视野不动(不再跳回最新)
   if (input) input.addEventListener('input', () => {
-    const wasAtBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+    const distFromBottom = log.scrollHeight - log.scrollTop - log.clientHeight;
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 140) + 'px';
-    if (wasAtBottom) log.scrollTop = log.scrollHeight;
+    // layout 改完后,把 scrollTop 调成保持原 distFromBottom
+    requestAnimationFrame(() => {
+      log.scrollTop = log.scrollHeight - log.clientHeight - distFromBottom;
+    });
   });
 
   function authFetch(url, opts) {
