@@ -322,6 +322,14 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   }
   button.plus:active { background: var(--border); }
   button.plus:disabled { opacity: .4; cursor: default; }
+  button.plus svg { width: 20px; height: 20px; display: block; }
+
+  /* 手机端:输入框全宽顶部 + 按钮第二行(参考 Claude 手机 chat) */
+  @media (max-width: 600px) {
+    footer { flex-wrap: wrap; align-items: center; }
+    footer textarea { flex-basis: 100%; order: -1; max-height: 120px; }
+    footer button.send { margin-left: auto; }
+  }
   /* 待发附件预览 */
   #pending { padding: 8px 12px; background: var(--top); border-top: 1px solid var(--border);
     display: flex; align-items: center; gap: 10px; }
@@ -428,7 +436,7 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
   <div id="pending" style="display:none;"></div>
   <footer>
     <button class="plus" id="plus" aria-label="附件">+</button>
-    <button class="plus" id="stickerBtn" aria-label="表情包" style="font-size:18px;">😀</button>
+    <button class="plus" id="stickerBtn" aria-label="表情包"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></button>
     <input type="file" id="fileIn" multiple style="display:none">
     <textarea id="input" placeholder="说点什么" rows="1"></textarea>
     <button class="send" id="send" aria-label="发送">↑</button>
